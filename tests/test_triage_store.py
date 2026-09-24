@@ -30,6 +30,14 @@ def test_an_operation_against_a_database_that_is_not_there_names_what_is_wrong()
         store.entries()
 
 
+def test_a_run_asked_of_a_store_that_is_not_there_is_refused() -> None:
+    """Asked to record a run with no database behind it, the store refuses rather than hangs."""
+    store = PostgresTriageStore(_nowhere())
+
+    with pytest.raises(TriageStoreUnavailable, match="unreachable"), store.transaction():
+        pass
+
+
 def _nowhere() -> str:
     """A DSN for a Postgres that is not there: a port that was reserved and then left unbound."""
     return f"postgresql://claim_triage:claim_triage@127.0.0.1:{free_port()}/claim_triage"

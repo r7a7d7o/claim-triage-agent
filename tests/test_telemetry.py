@@ -8,8 +8,10 @@ exactly this code with `CLAIM_TRIAGE_OTEL_ENDPOINT` set, and without it.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
+import sys
 import threading
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -121,7 +123,47 @@ def test_a_dead_endpoint_leaves_the_run_alone() -> None:
     assert trace_id is not None
 
 
-def test_a_logged_event_is_one_json_object_carrying_the_runs_identifiers(
+@pytest.fixture
+def logged(monkeypatch: pytest.MonkeyPatch) -> Iterator[io.StringIO]:
+    """A deployable's logging, configured to write where the test can read it afterwards.
+
+    stdout is replaced rather than captured: pytest's capture closes the stream it hands out between
+    test phases, and a handler installed for the run cannot survive writing to a closed file. The
+    handler comes off the root logger at the end, because it lives there rather than in the test.
+    """
+    written = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", written)
+    root = logging.getLogger()
+    before = list(root.handlers)
+    level = root.level
+    telemetry.configure_logging()
+    yield written
+    for handler in [handler for handler in root.handlers if handler not in before]:
+        root.removeHandler(handler)
+        handler.close()
+    root.setLevel(level)
+
+
+def test_every_event_is_one_json_object_on_stdout(logged: io.StringIO) -> None:
+    """What a deployable's stdout is: one JSON object per event, and no more for a second event."""
+    telemetry.log_event("run.completed", run_id=str(RUN))
+    telemetry.configure_logging()  # configuring twice must not produce a line twice
+    telemetry.log_event("run.completed", run_id=str(RUN))
+
+    lines = [line for line in logged.getvalue().splitlines() if line.strip()]
+
+    assert len(lines) == 2
+    for line in lines:
+        written = json.loads(line)
+        assert written["level"] == "INFO"
+        assert written["logger"] == "claim_triage"
+        assert written["event"] == "run.completed"
+        assert written["run_id"] == str(RUN)
+        assert written["trace_id"] is None
+        assert written["timestamp"].endswith("Z")
+
+
+def test_a_logged_event_is_one_json_object_carrying_the_run_identifiers(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.INFO, logger="claim_triage"):

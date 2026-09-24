@@ -124,6 +124,18 @@ def test_entries_moved_out_of_order_are_detected() -> None:
     assert "seq 1" in verification.problem
 
 
+def test_an_entry_that_does_not_follow_the_one_before_it_is_detected() -> None:
+    """One entry held twice: the second is not after the first, so a position is held twice."""
+    entries = chain(content())
+
+    verification = verify([entries[0], entries[0]])
+
+    assert not verification.ok
+    assert verification.problem is not None
+    assert "seq 1" in verification.problem
+    assert "does not follow seq 1" in verification.problem
+
+
 def test_an_entry_that_claims_a_position_it_does_not_hold_is_detected() -> None:
     """An entry renumbered to hide a removal is a change to the content the hash covers."""
     entries = chain(content(), content())

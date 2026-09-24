@@ -82,6 +82,11 @@ def content(run: TriageRun, node: str = "noop") -> AuditEntryContent:
     )
 
 
+def test_the_store_reports_ready_over_the_database_it_owns(store: PostgresTriageStore) -> None:
+    """What the triager's health route asks: a store that can read its own tables is ready."""
+    assert store.ready() is True
+
+
 def test_a_state_change_and_its_audit_entry_are_one_commit(
     store: PostgresTriageStore, dsn: str
 ) -> None:
