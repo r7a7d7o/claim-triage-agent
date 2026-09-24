@@ -115,8 +115,6 @@ class ModelSettings(BaseSettings):
         working directory and an empty model name a model nobody named; dropped, what is left is
         what this file says each field is.
         """
-        if not isinstance(values, dict):
-            return values
         return {field: value for field, value in values.items() if value != ""}
 
     @model_validator(mode="after")
