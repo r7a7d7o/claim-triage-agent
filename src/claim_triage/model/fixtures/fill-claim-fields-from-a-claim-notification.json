@@ -1,0 +1,10 @@
+{
+  "task": "Fill in the claim's own fields from this claim notification: the policy the claim is made against, the day the loss happened, and the amount claimed.",
+  "content": "Oznámenie škody - motorové vozidlo (synthetic sample)\nPoistná zmluva: SIM-2026-0001\nDátum škodovej udalosti: 14. 03. 2026\nNahlásená výška škody: 1 840,50 EUR\nEČV: BL-123XY",
+  "answer_as": "claim_triage.contract.models.ClaimSubmission",
+  "answer": {
+    "policy_number": "SIM-2026-0001",
+    "incident_date": "2026-03-14",
+    "claim_amount_eur": "1840.50"
+  }
+}

@@ -20,8 +20,10 @@ tracing backend down the same run completes on structured JSON logs, and replay 
 so nothing needs a credential. The seven deployables each start, resolve and validate their
 configuration and report it — the three with a surface (`core-sim`, `triager`, `api`) serve it. The
 compose stack comes up on one command with no credentials; the container job builds the image, scans
-it and drives one claim through the running stack at its entry point. The guard seam, the replay
-model client and the evaluation harness arrive in the remaining v0.1 tickets.
+it and drives one claim through the running stack at its entry point. The model sits behind a port
+with a replay adapter and a provider adapter, selected by configuration, so nothing needs a credential
+to run — no stage asks it for anything yet, which is what v0.2's extraction does. The guard seam and
+the evaluation harness arrive in the remaining v0.1 tickets.
 
 ## Unaffiliated, and synthetic or openly licensed data
 
@@ -51,8 +53,8 @@ uv run poe check                           # lint + types + unit tests — the g
 ```
 
 Individual tasks: `uv run poe lint`, `uv run poe types`, `uv run poe unit`, `uv run poe format`, plus
-`generate`, `contract` and `postgres` (below). CI runs the first three as three separate jobs, a
-fourth for the contract and the audit transaction, and the container job described below.
+`generate`, `contract`, `postgres` and `provider` (below). CI runs the first three as three separate
+jobs, a fourth for the contract and the audit transaction, and the container job described below.
 
 The stack — Postgres, Qdrant, Redis and the simulated surrounding systems — comes up on one command
 and returns only once every service reports healthy, rather than sleeping and hoping:
@@ -114,6 +116,10 @@ src/claim_triage/core_sim/
 src/claim_triage/triage/
                         one run: the graph skeleton, the run and audit tables, the pipeline, its
                         surface and the client the entry point reaches it with
+src/claim_triage/model/
+                        the model behind one port: the call, the replay and provider adapters, the
+                        fixtures the replay adapter answers from, and the one place that selects
+                        between them
 src/claim_triage/api/   the entry point's ASGI surface
 src/claim_triage/smoke.py
                         one claim end to end through a running stack — what the container job gates on
@@ -230,6 +236,58 @@ That one is not a unit test: whether two writes commit together is a property of
 forced — a failure between the two writes, and a second write the database refuses — against the real
 thing rather than against a double that agrees with itself.
 
+## The model port
+
+Every use of a model crosses one seam: a stage builds a `ModelCall` — the task it is asking, the
+document text a model reads, and the schema the answer must validate against — and the port answers
+with an instance of that schema, or raises. Two adapters sit behind it and `claim_triage.model.select`
+is the only module that imports either, so a stage cannot reach a model endpoint without going through
+the port; `tests/test_model_port.py` checks that, and pins by name the modules that open their own
+HTTP connections.
+
+|Selection|Adapter|What it needs|
+|---|---|---|
+|`replay` (default)|answers from the fixtures committed under `src/claim_triage/model/fixtures/`|nothing|
+|`provider`|`POST {base_url}/chat/completions`, with the answer's own JSON schema as a strict `response_format`|an endpoint and a model name|
+
+Replay is what an unconfigured environment gets, so a run, a test, a demo and a CI job need no
+endpoint and no credential. A fixture is one recorded call and the answer it got, and it is identified
+by what it holds rather than by where it sits:
+
+```json
+{
+  "task": "Fill in the claim's own fields from this claim notification: …",
+  "content": "Oznámenie škody - motorové vozidlo (synthetic sample)\n…",
+  "answer_as": "claim_triage.contract.models.ClaimSubmission",
+  "answer": {
+    "policy_number": "SIM-2026-0001",
+    "incident_date": "2026-03-14",
+    "claim_amount_eur": "1840.50"
+  }
+}
+```
+
+So renaming a fixture changes nothing, two files recording the same call are refused when the set is
+read, and a document edited after its answer was recorded is a call nothing answers rather than a call
+that gets a stale answer. The answer is validated against the caller's schema on every read, so a
+schema that changed fails at the call and names the file that has to be recorded again.
+
+The selection is part of every deployable's startup report, and configuration is what changes it:
+
+```bash
+uv run claim-triage-triager            # … "model_provider": "replay" …
+CLAIM_TRIAGE_MODEL_PROVIDER=provider \
+CLAIM_TRIAGE_MODEL_BASE_URL=http://localhost:11434/v1 \
+CLAIM_TRIAGE_MODEL_NAME=local-model \
+  uv run claim-triage-triager          # … the endpoint it would answer through, and no key …
+```
+
+`docs/adr/0006` records the decision, what the fixtures cost, and what is exercised where. The
+provider adapter is selected by configuration and never exercised in CI, which is what ticket 05 asks
+for: everything that drives it carries the `provider` marker, the default run leaves those out, and
+`uv run poe provider` is what asks for them. They drive it against a socket on loopback they serve
+themselves — no provider, no credential, and nothing that leaves the machine.
+
 ## Configuration
 
 Configuration is environment-based, per deployable. `.env` is read when present (gitignored); copy
@@ -254,6 +312,12 @@ to run locally.
 |`CLAIM_TRIAGE_TRIAGER_BASE_URL`|all|the triager the entry point forwards to|`http://localhost:8001`|
 |`CLAIM_TRIAGE_OTEL_ENDPOINT`|all|OTLP/HTTP endpoint; unset (or empty) means nothing is exported|unset|
 |`CLAIM_TRIAGE_LANGFUSE_HOST`|all|Langfuse host; unset means no Langfuse consumer|unset|
+|`CLAIM_TRIAGE_MODEL_PROVIDER`|all|which model answers a call: `replay` or `provider`|`replay`|
+|`CLAIM_TRIAGE_MODEL_BASE_URL`|all|the provider endpoint's root, version prefix included; required by `provider`|unset|
+|`CLAIM_TRIAGE_MODEL_NAME`|all|the model the endpoint is asked for; required by `provider`|unset|
+|`CLAIM_TRIAGE_MODEL_API_KEY`|all|bearer key for the endpoint, if it wants one; never reported|unset|
+|`CLAIM_TRIAGE_MODEL_FIXTURES`|all|where the replay adapter reads its answers|`src/claim_triage/model/fixtures`|
+|`CLAIM_TRIAGE_MODEL_TIMEOUT_SECONDS`|all|how long one call to an endpoint may take|`30`|
 |`CLAIM_TRIAGE_<DEPLOYABLE>_HOST`|per deployable, e.g. `CLAIM_TRIAGE_API_HOST`|bind host|`127.0.0.1`|
 |`CLAIM_TRIAGE_<DEPLOYABLE>_PORT`|per deployable, e.g. `CLAIM_TRIAGE_API_PORT`|bind port|the table above|
 

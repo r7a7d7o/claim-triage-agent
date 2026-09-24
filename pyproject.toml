@@ -54,6 +54,9 @@ unit = "pytest"
 contract = "pytest -m contract"
 # The audit transaction is a property of the database, so these need the same Postgres and nothing else.
 postgres = "pytest -m postgres"
+# The provider adapter is never exercised in CI (ticket 05): these drive it against a socket the
+# tests serve, and are asked for here rather than by the unit job.
+provider = "pytest -m provider"
 # The contract package is generated from contracts/core-sim.openapi.yaml, and committed.
 generate = "python -m claim_triage.codegen"
 check = ["lint", "types", "unit"]
@@ -90,9 +93,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # The contract tests drive a running service and a real Postgres, so the default run leaves them out
-# and `poe contract` is what asks for them.
-addopts = "-q -m 'not contract and not postgres'"
+# and `poe contract` is what asks for them. The provider tests drive the provider adapter, which
+# ticket 05 keeps out of CI entirely, so `poe provider` is what asks for those.
+addopts = "-q -m 'not contract and not postgres and not provider'"
 markers = [
     "contract: drives the generated client against a running core-sim (poe contract)",
     "postgres: needs the stack's Postgres, and nothing else (poe postgres)",
+    "provider: drives the provider adapter against a loopback socket (poe provider)",
 ]

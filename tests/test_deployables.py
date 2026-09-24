@@ -31,7 +31,7 @@ CONTRACT: tuple[tuple[str, str, int, str], ...] = (
     ("core-sim", "claim-triage-core-sim", 8080, "replica count"),
 )
 
-INFRASTRUCTURE_VARIABLES = (
+SHARED_VARIABLES = (
     "ENVIRONMENT",
     "POSTGRES_DSN",
     "REDIS_URL",
@@ -41,7 +41,16 @@ INFRASTRUCTURE_VARIABLES = (
     "TRIAGER_BASE_URL",
     "OTEL_ENDPOINT",
     "LANGFUSE_HOST",
+    # The model configuration, which every deployable resolves before it starts (ticket 05).
+    "MODEL_PROVIDER",
+    "MODEL_BASE_URL",
+    "MODEL_NAME",
+    "MODEL_API_KEY",
+    "MODEL_FIXTURES",
+    "MODEL_TIMEOUT_SECONDS",
 )
+"""The environment variables every deployable resolves: infrastructure and the model, as opposed to
+the bind address each deployable owns. `_isolated` clears exactly these."""
 
 SERVES: tuple[str, ...] = ("core-sim", "triager", "api")
 """The deployables that serve a surface, so their console scripts run until they are stopped.
@@ -64,7 +73,7 @@ def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **overrides: str)
         prefix = f"CLAIM_TRIAGE_{name.upper().replace('-', '_')}_"
         for field in ("HOST", "PORT"):
             monkeypatch.delenv(f"{prefix}{field}", raising=False)
-    for field in INFRASTRUCTURE_VARIABLES:
+    for field in SHARED_VARIABLES:
         monkeypatch.delenv(f"CLAIM_TRIAGE_{field}", raising=False)
     for variable, value in overrides.items():
         monkeypatch.setenv(variable, value)
@@ -198,3 +207,62 @@ def test_an_empty_observability_endpoint_means_the_stack_is_down(
     report = json.loads(capsys.readouterr().out)
     assert report["otel_endpoint"] is None
     assert report["langfuse_host"] is None
+
+
+def test_the_startup_report_names_the_model_arm_and_never_its_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Which model a deployable would answer a call with is configuration, so the report says it —
+    and a report is read out of logs and pasted into issues, so the key is what it does not say."""
+    key = "s3cret-model-key"
+    _isolated(
+        monkeypatch,
+        tmp_path,
+        CLAIM_TRIAGE_MODEL_PROVIDER="provider",
+        CLAIM_TRIAGE_MODEL_BASE_URL="http://model.internal:11434/v1",
+        CLAIM_TRIAGE_MODEL_NAME="local-model",
+        CLAIM_TRIAGE_MODEL_API_KEY=key,
+    )
+
+    assert _console_script("claim-triage-extraction")() == 0
+
+    captured = capsys.readouterr().out
+    report = json.loads(captured)
+    assert report["model_provider"] == "provider"
+    assert report["model_base_url"] == "http://model.internal:11434/v1"
+    assert report["model_name"] == "local-model"
+    assert key not in captured
+
+
+def test_replay_is_the_arm_an_unconfigured_deployment_reports(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nothing is configured, so nothing is needed to answer: the report says replay."""
+    _isolated(monkeypatch, tmp_path)
+
+    assert _console_script("claim-triage-extraction")() == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["model_provider"] == "replay"
+    assert report["model_base_url"] is None
+    assert report["model_name"] is None
+
+
+def test_a_provider_without_an_endpoint_is_rejected_naming_the_variables(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A configuration that could not answer a call is refused where it is written, by the process
+    that would otherwise have to live with it."""
+    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_MODEL_PROVIDER="provider")
+
+    assert _console_script("claim-triage-extraction")() == 2
+
+    rejected = capsys.readouterr().err
+    assert "CLAIM_TRIAGE_MODEL_BASE_URL" in rejected
+    assert "CLAIM_TRIAGE_MODEL_NAME" in rejected
