@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from claim_triage.bootstrap import resolve_and_report
 from claim_triage.services.registry import DEPLOYABLES, deployable
 
 if TYPE_CHECKING:
@@ -39,6 +40,16 @@ INFRASTRUCTURE_VARIABLES = (
     "OTEL_ENDPOINT",
     "LANGFUSE_HOST",
 )
+
+REPORTS_AND_EXITS: tuple[tuple[str, str, int, str], ...] = tuple(
+    row for row in CONTRACT if row[0] != "core-sim"
+)
+"""The deployables that report their configuration and exit.
+
+`core-sim` left this list in ticket 02: it serves the simulated surrounding systems' ASGI surface,
+so its console script runs until it is stopped. `tests/test_core_sim.py` drives that surface, and
+`test_serving_deployable_reports_before_it_serves` checks it still reports first.
+"""
 
 
 def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **overrides: str) -> None:
@@ -84,8 +95,8 @@ def test_unknown_deployable_is_rejected_naming_the_known_ones() -> None:
 
 @pytest.mark.parametrize(
     ("name", "console_script", "default_port"),
-    [row[:3] for row in CONTRACT],
-    ids=[row[0] for row in CONTRACT],
+    [row[:3] for row in REPORTS_AND_EXITS],
+    ids=[row[0] for row in REPORTS_AND_EXITS],
 )
 def test_deployable_starts_and_reports_its_configuration(
     name: str,
@@ -103,6 +114,24 @@ def test_deployable_starts_and_reports_its_configuration(
     assert report["service"] == name
     assert report["port"] == default_port
     assert report["qdrant_url"] == "http://localhost:6333"
+
+
+def test_serving_deployable_reports_before_it_serves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_CORE_SIM_HOST="0.0.0.0")
+
+    resolution, exit_code = resolve_and_report("core-sim")
+
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["service"] == "core-sim"
+    assert report["host"] == "0.0.0.0"
+    assert report["port"] == 8080
+    assert resolution is not None
+    assert (resolution.host, resolution.port) == ("0.0.0.0", 8080)
 
 
 def test_environment_overrides_win_and_credentials_are_masked(

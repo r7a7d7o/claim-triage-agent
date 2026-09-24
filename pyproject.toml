@@ -10,7 +10,10 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "fastapi>=0.116",
+    "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
+    "uvicorn>=0.35",
 ]
 
 [project.scripts]
@@ -21,9 +24,12 @@ claim-triage-retrieval = "claim_triage.services.retrieval:main"
 claim-triage-guardrail-policy = "claim_triage.services.guardrail_policy:main"
 claim-triage-reviewer-ui = "claim_triage.services.reviewer_ui:main"
 claim-triage-core-sim = "claim_triage.services.core_sim:main"
+# Not a deployable: drives one claim through a running stack (see the container section of README.md).
+claim-triage-smoke = "claim_triage.smoke:main"
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.13.1",
     "mypy>=1.13",
     "poethepoet>=0.30",
     "pytest>=8.3",

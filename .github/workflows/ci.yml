@@ -48,3 +48,60 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run poe unit
+
+  container:
+    name: container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Rootful Podman, because rootless Podman in a hosted runner is not something to bet a job on
+      # (docs/adr/0003); the runner image ships it. `--squash-all` flattens the image to the runtime
+      # filesystem, so what the build deleted — the download cache, pip, ensurepip — is not retained
+      # in an underlying layer and cannot be found by a scanner or extracted from the artefact. The
+      # tag is the one compose.yaml names, so the loaded image is the image the stack asks for.
+      - name: Build the image with Podman
+        run: |
+          sudo podman build \
+            --squash-all \
+            --tag localhost/claim-triage-agent:dev \
+            --file Containerfile \
+            .
+
+      - name: Export the image for scanning and for the stack
+        run: |
+          sudo podman save \
+            --format docker-archive \
+            --output /tmp/claim-triage-agent.tar \
+            localhost/claim-triage-agent:dev
+
+      # Trivy runs as a container, not through trivy-action: that action ignores `input` and would
+      # scan a path instead of this tar (aquasecurity/trivy-action v0.36.0, entrypoint.sh).
+      # `--ignore-unfixed` keeps the gate on findings this repository can act on: an unfixed CVE in a
+      # base image is not something a change here can fix, and gating on it would only teach people
+      # to bypass the gate. It is still printed, so it stays visible.
+      - name: Scan the image
+        run: |
+          docker run --rm --volume /tmp:/scan:ro docker.io/aquasec/trivy:0.74.0 image \
+            --input /scan/claim-triage-agent.tar \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1
+
+      # The same compose.yaml the developer runs, with the image Podman built: `up --no-build` keeps
+      # the runner's Docker from rebuilding it and hiding a broken Podman build, and `run` reuses the
+      # image the load just installed. The job reports success only once `claim-triage-smoke` has
+      # carried one claim through the running stack.
+      - name: Start the stack and process one claim end to end
+        run: |
+          docker load --input /tmp/claim-triage-agent.tar
+          docker compose up --detach --wait --wait-timeout 300 --no-build
+          docker compose --profile smoke run --rm smoke
+
+      - name: Report the stack's logs if the run failed
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes

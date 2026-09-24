@@ -1,0 +1,127 @@
+# The v0.1 development stack: shared infrastructure, the simulated surrounding systems, and the
+# application image. One command brings the whole stack up on a clean machine with no credentials
+# configured:
+#
+#     podman compose up --detach --wait
+#
+# `--wait` returns only once every service has passed its health check, and a service that needs
+# another one waits on that health check rather than on a sleep. The same file starts the same stack
+# in CI (see .github/workflows/ci.yml, and docs/adr/0003 for why CI runs it with the runner's docker
+# compose while the development loop uses Podman Compose). One claim goes through the running stack
+# with:
+#
+#     podman compose --profile smoke run --rm smoke
+#
+# Every health check is written as an explicit `CMD-SHELL` string. The argv form does not survive the
+# compose provider under Podman: a `CMD` list whose elements contain spaces is re-split on whitespace,
+# which turns `python -c "<script>"` into a syntax error, and it turns a check that happens to still
+# parse into one that exits 0 for the wrong reason.
+
+name: claim-triage-agent
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: claim_triage
+      POSTGRES_PASSWORD: claim_triage
+      POSTGRES_DB: claim_triage
+    ports:
+      # Published on the loopback interface only, and the host side is overridable for a machine where
+      # the port is taken: `CLAIM_TRIAGE_POSTGRES_HOST_PORT=5433` in `.env` moves it, while the stack
+      # keeps using the standard port on its own network.
+      - "127.0.0.1:${CLAIM_TRIAGE_POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP: while initialising, the image serves a temporary server on the unix socket only, so
+      # a socket check would call the database ready before it accepts connections.
+      test:
+        - CMD-SHELL
+        - pg_isready --host=127.0.0.1 --username=claim_triage --dbname=claim_triage
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "127.0.0.1:${CLAIM_TRIAGE_REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    ports:
+      # The HTTP API only: gRPC 6334 stays on the compose network until something asks for it.
+      - "127.0.0.1:${CLAIM_TRIAGE_QDRANT_HOST_PORT:-6333}:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      # The image carries no curl, wget or python, so the check speaks HTTP by hand over the one
+      # client it does carry: bash's /dev/tcp. It greps for the status line, so a qdrant that has
+      # bound its port but is not yet answering fails the check.
+      test:
+        - CMD-SHELL
+        - bash -c "exec 3<>/dev/tcp/127.0.0.1/6333; printf 'GET /healthz HTTP/1.0\r\n\r\n' >&3; grep -q '200 OK' <&3"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  core-sim:
+    # An explicit `localhost/` reference, because that is the image this repository builds and never
+    # pushes: `podman build --squash-all --tag localhost/claim-triage-agent:dev .`. Spelling it out
+    # keeps the name meaning the same image to Podman, which builds it, and to the Docker daemon that
+    # starts this same file in CI.
+    image: localhost/claim-triage-agent:dev
+    build:
+      context: .
+      dockerfile: Containerfile
+    command: ["claim-triage-core-sim"]
+    environment:
+      CLAIM_TRIAGE_ENVIRONMENT: local
+      CLAIM_TRIAGE_POSTGRES_DSN: postgresql://claim_triage:claim_triage@postgres:5432/claim_triage
+      # Not the 127.0.0.1 default: this service is reached across the compose network.
+      CLAIM_TRIAGE_CORE_SIM_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${CLAIM_TRIAGE_CORE_SIM_HOST_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # The route reports readiness, which for this service means its claims are reachable.
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  smoke:
+    # The same image and the same file as the developer's loop: one claim through the running stack.
+    image: localhost/claim-triage-agent:dev
+    build:
+      context: .
+      dockerfile: Containerfile
+    profiles: ["smoke"]
+    command: ["claim-triage-smoke"]
+    environment:
+      CLAIM_TRIAGE_CORE_SIM_BASE_URL: http://core-sim:8080
+    depends_on:
+      core-sim:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  qdrant-data:

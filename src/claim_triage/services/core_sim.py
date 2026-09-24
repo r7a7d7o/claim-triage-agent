@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from typing import Final
 
-from claim_triage.bootstrap import bootstrap
+import uvicorn
+
+from claim_triage.bootstrap import EXIT_OK, resolve_and_report
+from claim_triage.core_sim.app import create_app
+from claim_triage.core_sim.store import PostgresClaimStore
 
 SERVICE: Final = "core-sim"
 
 
 def main() -> int:
-    """Resolve this deployable's configuration, report it, and return the process exit code."""
-    return bootstrap(SERVICE)
+    """Hand over to the ASGI server, over the Postgres store this deployable owns."""
+    resolution, exit_code = resolve_and_report(SERVICE)
+    if resolution is None:
+        return exit_code
+
+    store = PostgresClaimStore(resolution.infrastructure.postgres_dsn.get_secret_value())
+    uvicorn.run(create_app(store), host=resolution.host, port=resolution.port)
+    return EXIT_OK
