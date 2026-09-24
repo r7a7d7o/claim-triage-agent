@@ -1,0 +1,6 @@
+{
+  "tolerance": 0.02,
+  "floors": {
+    "retrieval.citation_validity": 0.98
+  }
+}

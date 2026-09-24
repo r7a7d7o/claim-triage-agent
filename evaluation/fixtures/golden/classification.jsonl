@@ -1,0 +1,5 @@
+{"capability": "classification", "version": 1, "description": "The harness's own exercise set: four synthetic claims with the bands and the queue a correct run concludes."}
+{"case_id": "classification-0001", "claim": {"claim_amount_eur": "1840.50", "documents_complete": true, "incident_type": "parking_damage"}, "fraud_positive": false, "fraud_risk": "low", "severity": "minor", "queue": "fast-lane"}
+{"case_id": "classification-0002", "claim": {"claim_amount_eur": "12480.00", "documents_complete": true, "incident_type": "collision"}, "fraud_positive": false, "fraud_risk": "medium", "severity": "major", "queue": "handler-queue"}
+{"case_id": "classification-0003", "claim": {"claim_amount_eur": "39800.00", "documents_complete": false, "incident_type": "theft"}, "fraud_positive": true, "fraud_risk": "high", "severity": "major", "queue": "fraud-review"}
+{"case_id": "classification-0004", "claim": {"claim_amount_eur": "6210.75", "documents_complete": true, "incident_type": "windscreen"}, "fraud_positive": true, "fraud_risk": "medium", "severity": "moderate", "queue": "handler-queue"}

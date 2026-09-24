@@ -1,0 +1,4 @@
+{"case_id": "classification-0001", "answer": {"fraud_score": 0.02, "fraud_risk": "low", "severity": "minor", "queue": "fast-lane"}}
+{"case_id": "classification-0002", "answer": {"fraud_score": 0.2, "fraud_risk": "low", "severity": "moderate", "queue": "handler-queue"}}
+{"case_id": "classification-0003", "answer": {"fraud_score": 0.1, "fraud_risk": "high", "severity": "major", "queue": "handler-queue"}}
+{"case_id": "classification-0004", "answer": {"fraud_score": 0.4, "fraud_risk": "medium", "severity": "moderate", "queue": "handler-queue"}}

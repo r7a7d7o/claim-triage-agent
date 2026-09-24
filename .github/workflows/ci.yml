@@ -49,6 +49,51 @@ jobs:
       - run: uv sync --locked
       - run: uv run poe unit
 
+  # The evaluation harness is a gate rather than a test: it scores committed golden sets against the
+  # build and refuses a capability that degrades by more than two points against the tag's baseline,
+  # or a citation validity under its absolute floor. The committed sets are placeholders in v0.1, so
+  # this job's teeth are its last step: the fixture material is scored at the quality its baseline
+  # records, then again with the regressed answers installed over it, and the gate has to refuse the
+  # second one. A gate that refused everything would fail the step before it.
+  evaluation:
+    name: evaluation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0 # no floating major tag exists past v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+
+      # The committed sets, against the release tag's own baseline, under the declared rules.
+      - name: Score the committed golden sets
+        run: uv run poe eval
+
+      # The harness's own exercise set, as the build its baseline was recorded from.
+      - name: Score the fixture material against its recorded baseline
+        run: uv run poe eval-fixtures
+
+      # A regression injected into the fixtures: the same cases, answered worse than the baseline
+      # records. The step fails unless the gate refuses the run, which is what "a regression injected
+      # into the fixtures trips the CI job" means on every pull request rather than in prose. Exit `1`
+      # exactly: `1` is a declared rule firing, `2` is a run that could not be made, and accepting any
+      # non-zero would let a run that never printed a table pass for a gate that bit.
+      - name: Inject a regression into the fixtures and require the gate to refuse it
+        run: |
+          cp --recursive evaluation/fixtures /tmp/regressed
+          cp /tmp/regressed/regressed/*.jsonl /tmp/regressed/predictions/
+          status=0
+          uv run claim-triage-eval \
+              --sets /tmp/regressed/golden \
+              --predictions /tmp/regressed/predictions \
+              --baseline /tmp/regressed/baseline.json > /tmp/regressed/table.txt || status=$?
+          cat /tmp/regressed/table.txt
+          if [ "$status" -ne 1 ]; then
+            echo "::error::the evaluation gate answered $status; 1 is a declared rule firing, 2 is a run that could not be made"
+            exit 1
+          fi
+
   # Postgres is what both of these jobs' tests need, and neither is a unit test: the contract job
   # drives a generated client against a running service, and the audit transaction is a property of
   # the database rather than of the code that asks for one.

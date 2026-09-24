@@ -1,0 +1,21 @@
+{
+  "tag": "v0.1.0",
+  "settings": {
+    "top_k": 5
+  },
+  "sets": {
+    "extraction": {
+      "version": 1,
+      "cases": 0
+    },
+    "retrieval": {
+      "version": 1,
+      "cases": 0
+    },
+    "classification": {
+      "version": 1,
+      "cases": 0
+    }
+  },
+  "metrics": {}
+}

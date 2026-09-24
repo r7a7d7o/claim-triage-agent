@@ -32,6 +32,8 @@ claim-triage-reviewer-ui = "claim_triage.services.reviewer_ui:main"
 claim-triage-core-sim = "claim_triage.services.core_sim:main"
 # Not a deployable: drives one claim through a running stack (see the container section of README.md).
 claim-triage-smoke = "claim_triage.smoke:main"
+# Not a deployable: scores the golden sets and applies the evaluation gate (see `evaluation/`).
+claim-triage-eval = "claim_triage.evaluation.runner:main"
 
 [dependency-groups]
 dev = [
@@ -59,6 +61,10 @@ postgres = "pytest -m postgres"
 # The provider adapter is never exercised in CI (ticket 05): these drive it against a socket the
 # tests serve, and are asked for here rather than by the unit job.
 provider = "pytest -m provider"
+# The evaluation gate: the committed golden sets scored against the build, judged by the declared
+# rules. The fixture material beside them is what the evaluation CI job injects a regression into.
+eval = "claim-triage-eval"
+eval-fixtures = "claim-triage-eval --sets evaluation/fixtures/golden --predictions evaluation/fixtures/predictions --baseline evaluation/fixtures/baseline.json"
 # The contract package is generated from contracts/core-sim.openapi.yaml, and committed.
 generate = "python -m claim_triage.codegen"
 check = ["lint", "types", "unit"]
