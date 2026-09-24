@@ -138,7 +138,13 @@ class UnexpectedResponse(CoreSimError):
 
 
 class Refusal(CoreSimError):
-    """An error the contract documents: the systems refused the call and named why."""
+    """An error the contract documents: the systems refused the call and named why.
+
+    It narrows `status_code` to an int: a refusal is built from a response, so it always carries the
+    status the systems answered, and a caller relaying one never has to ask whether it has a status.
+    """
+
+    status_code: int
 
     def __init__(self, status_code: int, response: ErrorResponse) -> None:
         super().__init__(f"{response.code}: {response.detail}", status_code=status_code)

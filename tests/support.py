@@ -19,6 +19,7 @@ and because the synthetic corpus those tests will eventually use is ticket 13's 
 from __future__ import annotations
 
 import json
+import re
 import socket
 import time
 from contextlib import contextmanager
@@ -286,6 +287,13 @@ PDF: Final = "application/pdf"
 ZIP: Final = "application/zip"
 """The two content types the ingress takes, as the tests declare them."""
 
+ENCRYPTED_FLAG: Final = 0x1
+"""The general purpose bit that says a zip entry is encrypted (APPNOTE 4.4.4)."""
+
+LOCAL_FLAG_OFFSET: Final = 6
+CENTRAL_FLAG_OFFSET: Final = 8
+"""Where that bit sits in a local file header and in a central directory header."""
+
 TEST_GUARD: Final = GuardSettings(
     media_types=frozenset({PDF, ZIP}),
     max_submission_bytes=8192,
@@ -331,6 +339,54 @@ def zip_of(entries: Mapping[str, bytes]) -> bytes:
 def zip_bomb(expanded: int = 512 * 1024) -> bytes:
     """A zip bomb: a few hundred bytes that declare half a megabyte of nothing."""
     return zip_of({"scan.bin": b"\0" * expanded})
+
+
+def zip_marked_encrypted(entries: Mapping[str, bytes]) -> bytes:
+    """A zip whose entries carry the encryption flag a password-protected archive sets.
+
+    `zipfile` cannot write an encrypted archive, so the flag is set where the format puts it — the
+    general purpose bit of the local header and of the central directory — which is what the ingress
+    reads. Nothing is decrypted at the boundary, so the flag is the whole of what it can know.
+    """
+    marked = bytearray(zip_of(entries))
+    headers = ((b"PK\x03\x04", LOCAL_FLAG_OFFSET), (b"PK\x01\x02", CENTRAL_FLAG_OFFSET))
+    for marker, bit_at in headers:
+        start = marked.index(marker) + bit_at
+        flag = int.from_bytes(marked[start : start + 2], "little") | ENCRYPTED_FLAG
+        marked[start : start + 2] = flag.to_bytes(2, "little")
+    return bytes(marked)
+
+
+def pdf_with_a_lost_page_object() -> bytes:
+    """A PDF whose page object has no body, so its page tree cannot be resolved.
+
+    The reader opens it — the cross-reference and the trailer are intact — and fails when the pages
+    are resolved, which is what a truncated or garbled document does, and the failure a guard that
+    trusted the reader to fail only early would turn into a 500.
+    """
+    whole = pdf(1)
+    page_object = _page_object_number(whole)
+    header = whole.index(f"{page_object} 0 obj".encode())
+    emptied = whole[:header] + f"{page_object} 0 obj\nendobj\n".encode()
+    return emptied + whole[whole.index(b"endobj", header) + len(b"endobj") :]
+
+
+def pdf_with_no_pages() -> bytes:
+    """A PDF whose page tree names a page that is not in the file: it opens, and holds nothing.
+
+    The corruption a truncated download produces, and one the reader reports as an empty document
+    rather than as a failure — which is why the ingress refuses it itself.
+    """
+    whole = pdf(1)
+    page_object = _page_object_number(whole)
+    return whole.replace(f"/Kids [ {page_object} 0 R ]".encode(), b"/Kids [ 99 0 R ]", 1)
+
+
+def _page_object_number(whole: bytes) -> str:
+    """Which object the page tree points at, so a test can corrupt that one and no other."""
+    page_tree = re.search(rb"/Kids\s*\[\s*(\d+)\s+0\s+R", whole)
+    assert page_tree is not None, whole
+    return page_tree.group(1).decode()
 
 
 def upload(

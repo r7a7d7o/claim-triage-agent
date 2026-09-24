@@ -12,6 +12,7 @@ module's.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from io import BytesIO
 
 import pytest
@@ -26,7 +27,18 @@ from claim_triage.guards.ingress import (
 )
 from claim_triage.guards.rate_limit import Admission, Bucket, Limiters, RateLimit
 from claim_triage.guards.verdict import Check, DocumentVerdicts, Verdict
-from support import PDF, ZIP, encrypted_pdf, pdf, upload, zip_bomb, zip_of
+from support import (
+    PDF,
+    ZIP,
+    encrypted_pdf,
+    pdf,
+    pdf_with_a_lost_page_object,
+    pdf_with_no_pages,
+    upload,
+    zip_bomb,
+    zip_marked_encrypted,
+    zip_of,
+)
 
 LIMITS: IngressLimits = IngressLimits(
     media_types=frozenset({PDF, ZIP}),
@@ -83,6 +95,18 @@ def test_an_archive_passes_the_checks_that_apply_to_an_archive() -> None:
     assert all(verdict.passed for verdict in document.verdicts)
 
 
+def test_a_content_type_the_allow_list_takes_away_is_refused_before_it_is_read() -> None:
+    """Configuring a type away removes it without removing its checks: a zip is still a zip."""
+    narrowed = replace(LIMITS, media_types=frozenset({PDF}))
+    bundle = upload(zip_of({"oznamenie-skody.pdf": pdf(1)}), media_type=ZIP, filename="claim.zip")
+
+    (document,) = screened(bundle, limits=narrowed)
+
+    assert [verdict.check for verdict in document.verdicts] == [Check.SIZE, Check.MEDIA_TYPE]
+    assert document.verdicts[-1].passed is False
+    assert ZIP in document.verdicts[-1].detail
+
+
 @pytest.mark.parametrize(
     ("content", "media_type", "expected"),
     [
@@ -92,6 +116,9 @@ def test_an_archive_passes_the_checks_that_apply_to_an_archive() -> None:
         (b"PK\x03\x04 truncated", ZIP, Check.STRUCTURE),
         (encrypted_pdf(), PDF, Check.ENCRYPTION),
         (pdf(4), PDF, Check.PAGE_COUNT),
+        (pdf_with_a_lost_page_object(), PDF, Check.STRUCTURE),
+        (pdf_with_no_pages(), PDF, Check.STRUCTURE),
+        (zip_marked_encrypted({"oznamenie-skody.pdf": pdf(1)}), ZIP, Check.ENCRYPTION),
         (zip_bomb(), ZIP, Check.ARCHIVE),
     ],
     ids=[
@@ -101,6 +128,9 @@ def test_an_archive_passes_the_checks_that_apply_to_an_archive() -> None:
         "malformed-archive",
         "encrypted",
         "over-page-count",
+        "unresolvable-page-tree",
+        "no-pages",
+        "encrypted-archive",
         "archive-bomb",
     ],
 )

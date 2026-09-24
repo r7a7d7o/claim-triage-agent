@@ -26,7 +26,7 @@ from claim_triage.guards.verdict import Check, DocumentVerdicts, Verdict
 from claim_triage.triage import audit
 from claim_triage.triage.audit import Actor, AuditEntryContent
 from claim_triage.triage.run import TriageRun
-from claim_triage.triage.store import PostgresTriageStore
+from claim_triage.triage.store import PostgresTriageStore, TriageStoreUnavailable
 
 pytestmark = pytest.mark.postgres
 
@@ -173,6 +173,38 @@ def test_the_chain_continues_over_what_the_log_already_holds(store: PostgresTria
     assert [entry.seq for entry in entries] == [1, 2, 3]
     assert [entry.prev_hash for entry in entries[1:]] == [entry.hash for entry in entries[:-1]]
     assert audit.verify(entries).ok
+
+
+def test_a_store_that_fails_inside_the_transaction_leaves_neither_write(
+    store: PostgresTriageStore, dsn: str
+) -> None:
+    """The database going away between the two writes is a store failure, not a half-written run."""
+    run = a_run()
+
+    with pytest.raises(TriageStoreUnavailable):
+        _both_writes_over_a_store_that_dies(store, run, dsn)
+
+    assert store.read_run(run.run_id) is None
+    assert store.entries() == ()
+
+
+def _both_writes_over_a_store_that_dies(
+    store: PostgresTriageStore, run: TriageRun, dsn: str
+) -> None:
+    """Both writes, with the connection killed between them: the database's own failure."""
+    with store.transaction() as transaction:
+        transaction.record_run(run)
+        _terminate_the_other_backends(dsn)
+        transaction.append_entry(content(run))
+
+
+def _terminate_the_other_backends(dsn: str) -> None:
+    """Kill every backend on this database but this one, which is the store's own connection."""
+    with psycopg.connect(dsn) as connection:
+        connection.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+            " WHERE pid <> pg_backend_pid() AND datname = current_database()"
+        )
 
 
 def test_an_entry_changed_in_the_database_is_detected(store: PostgresTriageStore, dsn: str) -> None:

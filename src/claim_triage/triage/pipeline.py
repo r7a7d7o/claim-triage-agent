@@ -95,7 +95,7 @@ class TriagePipeline:
                 ) from None
             except Refusal as refusal:
                 raise Refused(
-                    answered_with(refusal), BoundaryError.relayed(refusal.response)
+                    refusal.status_code, BoundaryError.relayed(refusal.response)
                 ) from refusal
             except TriageStoreUnavailable as unavailable:
                 raise Unavailable(str(unavailable)) from None
@@ -165,17 +165,6 @@ class TriagePipeline:
             ClaimStatusUpdate(status=status),
             idempotency_key=f"{request.run_id}/status",
         )
-
-
-def answered_with(refusal: Refusal) -> int:
-    """The status the systems answered a refusal with.
-
-    A refusal the client built from a response always carries one; one that does not is a defect
-    here rather than a refusal we could relay, so it fails loudly instead of guessing a status.
-    """
-    if refusal.status_code is None:
-        raise ValueError("a refusal the systems answered carries no status")
-    return refusal.status_code
 
 
 def submission(request: RunRequest) -> ClaimSubmission:

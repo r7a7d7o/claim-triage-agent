@@ -225,7 +225,7 @@ check. What it does now, per uploaded document:
 |---|---|---|
 |size|an upload past `CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_BYTES`, read one byte past the ceiling and no further|413 `payload_too_large`|
 |media type|a declared type the boundary does not take|415 `unsupported_media_type`|
-|structure|bytes that are not the document they claim to be — including anything the PDF reader raises|422 `document_refused`|
+|structure|bytes that are not the document they claim to be: anything the PDF reader raises, and a PDF whose page tree resolves to nothing|422 `document_refused`|
 |encryption|a PDF the reader reports as encrypted — whether or not an empty password would open it, because the boundary does not guess passwords|422 `document_refused`|
 |archive|a zip whose own directory declares an expansion past `…_MAX_ARCHIVE_EXPANSION_RATIO`|422 `document_refused`|
 |page count|more pages than `CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_PAGES`|422 `document_refused`|

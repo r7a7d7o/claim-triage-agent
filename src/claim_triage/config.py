@@ -151,13 +151,12 @@ class GuardSettings(BaseSettings):
     @field_validator("media_types", mode="before")
     @classmethod
     def _a_json_array_of_media_types(cls, value: object) -> object:
-        """The list as the environment states it: a JSON array, or unset.
+        """The list as the environment states it: a JSON array of media types.
 
-        No separator is safe inside a media type, so the value is JSON; an empty one is unset, as
-        every other empty variable in this repository is.
+        No separator is safe inside a media type, so the value is JSON. An empty variable never
+        arrives here: `env_ignore_empty` drops it before validation, which leaves the field's own
+        default — the same answer, one layer up, and nothing to keep alive here.
         """
-        if value == "":
-            return frozenset(DEFAULT_GUARD_MEDIA_TYPES)
         if not isinstance(value, str):
             return value
         try:

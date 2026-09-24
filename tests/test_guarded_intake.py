@@ -17,7 +17,8 @@ small enough that a test's document is small too.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Final
 
 import httpx2
 import pytest
@@ -28,6 +29,7 @@ from claim_triage.contract.models import ClaimStatus
 from claim_triage.guards.verdict import Check
 from claim_triage.triage import audit
 from support import (
+    CLAIM,
     PDF,
     TEST_GUARD,
     Skeleton,
@@ -42,6 +44,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from claim_triage.guards.ingress import Upload
+
+BOUNDARY: Final = "a-boundary-the-transport-never-declares"
+"""The multipart boundary a test writes by hand, to send a body with no declared length."""
 
 LIMITED: GuardSettings = GuardSettings(
     media_types=TEST_GUARD.media_types,
@@ -258,6 +263,51 @@ def test_a_body_that_is_not_a_submission_at_all_is_refused_in_the_same_shape(
     assert response.json()["code"] == BoundaryCode.INVALID_PAYLOAD.value
     assert response.json()["detail"]
     assert wired.triage.runs == ()
+
+
+def test_a_submission_with_no_claim_part_is_refused_naming_the_part(
+    skeleton: Callable[..., Skeleton],
+) -> None:
+    """A document with no claim beside it is outside the wire, and the wire's binding says so."""
+    wired = skeleton()
+
+    with httpx2.Client(base_url=wired.api_url) as client:
+        response = client.post("/claims", files=[("documents", ("a.pdf", pdf(1), PDF))])
+
+    assert response.status_code == 422, response.text
+    assert response.json()["code"] == BoundaryCode.INVALID_PAYLOAD.value
+    assert "claim" in response.json()["detail"]
+    assert wired.systems.claims == ()
+    assert wired.triage.runs == ()
+
+
+def test_a_submission_that_declares_no_length_is_carried_rather_than_refused(
+    skeleton: Callable[..., Skeleton],
+) -> None:
+    """A chunked submission cannot be judged by a length it never declared, so it is not refused for
+    one: what bounds it is the per-document ceiling as each document is read, which `docs/adr/0007`
+    states rather than leaves to be discovered."""
+    wired = skeleton()
+
+    with httpx2.Client(base_url=wired.api_url) as client:
+        response = client.post(
+            "/claims",
+            content=iter([chunked_submission(claim=json.dumps(CLAIM))]),
+            headers={"content-type": f"multipart/form-data; boundary={BOUNDARY}"},
+        )
+
+    assert response.status_code == 201, response.text
+    (recorded,) = wired.triage.runs
+    assert recorded.status == ClaimStatus.TRIAGED
+
+
+def chunked_submission(**parts: str) -> bytes:
+    """One multipart body, written by hand so a test can send it without a declared length."""
+    rendered = "".join(
+        f'--{BOUNDARY}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+        for name, value in parts.items()
+    )
+    return f"{rendered}--{BOUNDARY}--\r\n".encode()
 
 
 def test_a_claim_outside_the_wire_is_still_refused_naming_the_field(

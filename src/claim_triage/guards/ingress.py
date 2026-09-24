@@ -204,6 +204,15 @@ def _pdf(upload: Upload, limits: IngressLimits) -> tuple[Verdict, ...]:
     except Exception as unreadable:  # a page tree is as attacker-controlled as the header
         return (structure, _refused(Check.STRUCTURE, f"its pages are unreadable: {unreadable}"))
 
+    if pages < 1:
+        # A page tree that resolves to nothing is a corrupt document, not an empty one: a claim
+        # document that holds no pages is one nothing downstream can read a field out of.
+        return (
+            structure,
+            _passed(Check.ENCRYPTION, "it is not encrypted"),
+            _refused(Check.STRUCTURE, "it holds no pages"),
+        )
+
     if pages > limits.max_pages:
         return (
             structure,
