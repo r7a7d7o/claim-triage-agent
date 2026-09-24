@@ -53,8 +53,8 @@ uv run poe check                           # lint + types + unit tests — the g
 ```
 
 Individual tasks: `uv run poe lint`, `uv run poe types`, `uv run poe unit`, `uv run poe format`, plus
-`generate`, `contract` and `postgres` (below). CI runs the first three as three separate jobs, a
-fourth for the contract and the audit transaction, and the container job described below.
+`generate`, `contract`, `postgres` and `provider` (below). CI runs the first three as three separate
+jobs, a fourth for the contract and the audit transaction, and the container job described below.
 
 The stack — Postgres, Qdrant, Redis and the simulated surrounding systems — comes up on one command
 and returns only once every service reports healthy, rather than sleeping and hoping:
@@ -119,6 +119,7 @@ src/claim_triage/triage/
 src/claim_triage/model/
                         the model behind one port: the call, the replay and provider adapters, the
                         fixtures the replay adapter answers from, and the one place that selects
+                        between them
 src/claim_triage/api/   the entry point's ASGI surface
 src/claim_triage/smoke.py
                         one claim end to end through a running stack — what the container job gates on
@@ -281,9 +282,11 @@ CLAIM_TRIAGE_MODEL_NAME=local-model \
   uv run claim-triage-triager          # … the endpoint it would answer through, and no key …
 ```
 
-`docs/adr/0006` records the decision, what the fixtures cost, and what is exercised where: the
-provider adapter is driven in the tests against a socket the tests serve on loopback, and no test and
-no CI job reaches a model provider.
+`docs/adr/0006` records the decision, what the fixtures cost, and what is exercised where. The
+provider adapter is selected by configuration and never exercised in CI, which is what ticket 05 asks
+for: everything that drives it carries the `provider` marker, the default run leaves those out, and
+`uv run poe provider` is what asks for them. They drive it against a socket on loopback they serve
+themselves — no provider, no credential, and nothing that leaves the machine.
 
 ## Configuration
 

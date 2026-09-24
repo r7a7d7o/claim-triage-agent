@@ -39,14 +39,21 @@ not a refusal to retry. Selecting it is an explicit act: the adapter cannot be b
 endpoint and a model name, `ModelSettings` rejects a selection that names only one of them, and the
 key is optional, because the local endpoint this repository is built to run against has none.
 
-**What is exercised where.** The provider adapter is exercised in CI, but only against a socket the
-tests serve on loopback that answers the way such an endpoint would, so what the adapter puts on the
-wire is asserted and a change to it cannot rot unnoticed. No test and no CI job reaches a model
-provider, holds a credential for one, or needs either: replay is what the unconfigured environment
-every job runs in selects. The ticket's "never exercised in CI" is read as "never against a provider in
-CI" — an adapter with no test at all would be the one piece of this repository whose behaviour nothing
-checks, and that is the larger risk. Should the stricter reading be wanted, the tests that serve the
-fake endpoint are one class and its fixture, and marking them out of the unit job is a small change.
+**What is exercised where.** The provider adapter is never exercised in CI, which is the ticket's
+criterion read as written. Everything that drives it carries the `provider` marker, `pyproject.toml`
+keeps that marker out of the default pytest run, and `uv run poe provider` is what asks for those
+tests — the same shape as `poe contract` and `poe postgres`, with the difference that no CI job asks
+for this one. What they drive the adapter against is a socket on loopback that they serve themselves,
+so it stays checkable where it is changed: no provider is reached, no credential is read, and nothing
+leaves the machine.
+
+That cost is why the marker exists rather than why the tests do. A change to the adapter's wire format
+passes CI, and only whoever runs `poe provider` sees it. The alternative — exercising the adapter in
+the unit job, against the same served socket — was rejected because the ticket says what it says: an
+acceptance criterion is the reviewer's contract, and quietly testing the thing it excludes is how a
+criterion stops meaning anything. It is also the smaller of the two risks: the adapter is one file
+whose failure is loud at the first call, and the increment that first calls it (v0.2's extraction) is
+where an endpoint is exercised for real, by hand, under observation.
 
 ## Considered Options
 
@@ -63,6 +70,10 @@ fake endpoint are one class and its fixture, and marking them out of the unit jo
 - **Retries and a circuit breaker inside the provider adapter.** Rejected for this increment:
   resilience policy is ticket 28's subject, and a retry here would hide the failure counts that
   ticket's circuit breaker is supposed to act on.
+- **Exercising the provider adapter in the unit job, against a socket the tests serve.** Rejected:
+  the ticket's criterion is that the adapter is never exercised in CI, and a job that quietly
+  contradicts a criterion is worse than the CI coverage it buys. `poe provider` runs those tests
+  instead.
 - **Requiring a key whenever the provider adapter is selected.** Rejected: a hosted endpoint needs
   one, the local endpoint this repository targets does not, and requiring it would make "no
   credentials required to run the demo" false for the configuration the demo uses.
