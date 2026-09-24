@@ -99,9 +99,9 @@ claim actually is.
 
 ## The same exception, as each role meets it
 
-The three roles meet one exception at different moments and with different questions, which is why a
-session asks all three about the four the bank opens with. The table is the bank's opening questions
-worked through as a routing decision rather than an assertion: it says who answers what.
+The three roles meet one exception at different moments and with different questions, which is why the
+sessions ask each of the three about the four the bank opens with. The table is the bank's opening
+questions worked through as a routing decision rather than an assertion: it says who answers what.
 
 |Exception|Back-office|likvidátor|underwriter|
 |---|---|---|---|

@@ -63,8 +63,9 @@ Six steps, in order. Each ends on the artefact it produces.
 6. **Translate it.** Turn each critique item into a change to a named document — a specification, a
    schema, a ticket, this protocol — and then into either a ticket in the next increment or an
    explicit **wontfix** with its reason.
-   *Ends when:* every item in the critique note has a delta and a destination, and nothing is left as
-   "noted".
+   *Ends when:* every item in the critique note has a delta and a destination, nothing is left as
+   "noted", and every question the persona could not answer is in the walkthrough's or the record's
+   open items, flagged for a real stakeholder.
 
 ## The record
 
