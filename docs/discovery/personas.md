@@ -105,7 +105,7 @@ worked through as a routing decision rather than an assertion: it says who answe
 
 |Exception|Back-office|likvidátor|underwriter|
 |---|---|---|---|
-|Police record missing|sees it at intake; registers the set as incomplete|decides whether the claim can proceed without it, and for how long|says whether the conditions make the record mandatory for this peril|
-|Plate (*EČV*) does not match the policy|reads the plate off the submission and the policy|decides whether the vehicle is the insured one and what follows|says which vehicle the contract covers|
+|A mandatory document is missing|sees it at intake; registers the set as incomplete|decides whether the claim can proceed without it, and for how long|says whether the conditions make the record mandatory for this peril|
+|A plate (*EČV*) or VIN does not match the policy|reads the plate off the submission and the policy|decides whether the vehicle is the insured one and what follows|says which vehicle the contract covers|
 |A field cannot be read|reports the document as unreadable, requests a better one|decides what to do with the value it needed|—|
-|The claim is submitted twice|catches the duplicate and merges or returns it|decides which submission to work on|—|
+|The same claim was submitted twice|catches the duplicate and merges or returns it|decides which submission to work on|—|

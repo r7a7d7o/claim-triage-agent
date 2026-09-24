@@ -40,12 +40,12 @@ Six steps, in order. Each ends on the artefact it produces.
 2. **Walk today's work.** The persona says how the work is actually done now: the journey of one
    claim, who touches it, where it waits, which systems it is re-typed between. The interviewer fills
    [process-walkthrough.md](process-walkthrough.md) from the persona's own words as they come.
-   *Ends when:* every field of the walkthrough has an entry, including the waits, the handoffs and
-   every place the same value is written down twice.
+   *Ends when:* the walkthrough's case, steps, handoffs, duplicated values, checks and volumes have an
+   entry; its exception and workaround sections are step 3's to fill.
 
-3. **Press on the exceptions and the workarounds.** Work the exception and workaround sections of
-   [question-bank.md](question-bank.md): the exceptions the happy path hides, and the workarounds
-   nobody writes down.
+3. **Press on the exceptions and the workarounds.** Work [question-bank.md](question-bank.md) — its
+   exceptions, its workarounds, and the tacit rules and authority it asks after — and fill the
+   walkthrough's exception and workaround sections from what the persona answers.
    *Ends when:* every exception question has an answer or an explicit "that does not happen here",
    and every workaround named is in the walkthrough.
 

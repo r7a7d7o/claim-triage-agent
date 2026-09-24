@@ -36,6 +36,8 @@ the record. [question-bank.md](question-bank.md) is the lookup the later section
 - Describe your job to somebody who has never worked in motor claims.
 - What is on your screen when you start the day?
 - How many claims are yours right now, and how many arrive on a normal day?
+- Which day of the week is the heavy one, and is there a season for it?
+- How is the queue measured — what number does somebody watch?
 - What is the thing you are measured on that you would rather not be?
 - What do you hand to somebody else in the course of a claim, and what do they hand back to you?
 
@@ -78,8 +80,7 @@ the record. [question-bank.md](question-bank.md) is the lookup the later section
 *What it is for: the systems of record, and where the work leaks out of them.*
 
 - Which systems do you have open at once while working a claim?
-- What do you type into two of them?
-- What do you keep in your own notes, and why is it not in the system?
+- When two of them hold the same value, which one wins?
 - Where do you look to know where a claim actually is, as opposed to where it says it is?
 - What does the register do when a submission arrives that it has seen before?
 - What goes wrong when two people work the same claim?
@@ -89,11 +90,13 @@ the record. [question-bank.md](question-bank.md) is the lookup the later section
 *What it is for: the part of the work nobody writes down. It produces the walkthrough's exception and
 workaround sections.*
 
-- Work [question-bank.md](question-bank.md)'s exception section straight down, for this role. "That
-  is not mine" is a valid answer and is recorded as one.
-- Then its workaround section, the same way.
+- Work [question-bank.md](question-bank.md) straight down, for this role: its exceptions, then the
+  workarounds, then the tacit rules and the authority it asks after. "That is not mine" is a valid
+  answer and is recorded as one.
 - Every answer that arrives as a story rather than a rule is followed with "where is that written
   down?"
+- The bank's close — evidence and trust, what the role is measured on, what it would refuse to have
+  decided for it — section 7 takes.
 
 ## 7. The close
 

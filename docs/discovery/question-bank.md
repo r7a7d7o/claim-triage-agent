@@ -3,8 +3,9 @@
 > **SIMULATED.** These questions are put to a persona, a role-play written for this repository, and
 > the answers are staged. Nothing here records a real interview.
 
-The lookup the session's later steps dip into: the exceptions the happy path hides and the workarounds
-nobody writes down. It is consulted, not read straight through, and it is a **floor** rather than a
+What a session asks after the arc has reached the day's work: the exceptions the happy path hides, the
+workarounds nobody writes down, the rules the role carries in its head, and what it would refuse to
+have decided for it. It is consulted, not read straight through, and it is a **floor** rather than a
 closed list — a session that only answers these has found only what was already anticipated.
 
 Ask each question of the role that owns it. A question outside a persona's role is answered "that is

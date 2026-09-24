@@ -3,8 +3,8 @@
 > **SIMULATED.** A record written into this template documents a staged session with a role-play
 > persona, not a real stakeholder interview. Every part of it carries the stamp.
 
-One file per session, at `docs/discovery/sessions/NN-<persona>.md`, numbering sessions in the order
-they were run; the directory is created by the first one. The record is the session's only durable
+Where a record goes and how records are numbered is the protocol's
+([the record](protocol.md)); this file is the shape of one. The record is the session's only durable
 artefact — the walkthrough, the transcript, the critique and the delta all live in it, because a
 critique read apart from the walkthrough it came out of cannot be judged.
 
@@ -65,8 +65,3 @@ themselves. The estimate I read afterwards, and only as far as the parts list.
 Anything the persona could not answer is written down as it said it — "that is not mine, ask the
 underwriter" — rather than filled in by the interviewer, because the boundary of a role is one of the
 things a session is for finding.
-
-## A finished record
-
-The directory holds no record until a session runs; when one does, it is written into the template
-above and checked against the recording rules in [protocol.md](protocol.md).
