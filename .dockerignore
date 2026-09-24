@@ -1,0 +1,23 @@
+# The image needs the lock, the manifest, the source and the licence. Everything else stays out of
+# the build context: the corpus, the tracker, the local environment and the tests.
+
+.git
+.github
+.agents
+.scratch
+.venv
+docs
+tests
+sample
+
+__pycache__
+*.py[cod]
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.hypothesis
+.coverage
+htmlcov
+
+.env
+.env.*
