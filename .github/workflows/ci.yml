@@ -49,6 +49,45 @@ jobs:
       - run: uv sync --locked
       - run: uv run poe unit
 
+  contract:
+    name: contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0 # no floating major tag exists past v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+
+      # The contract package is committed, so regenerating it must change nothing. `git status` rather
+      # than a diff alone, because a file the generator stopped writing shows up as untracked. Why it
+      # is committed at all is in docs/adr/0004.
+      - name: Regenerate the contract package from the contract
+        run: |
+          uv run poe generate
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo '::error::src/claim_triage/contract is not what contracts/core-sim.openapi.yaml generates'
+            git --no-pager diff
+            exit 1
+          fi
+
+      # Postgres is the one piece of the stack these tests need: they start the service themselves, on
+      # a port of their own and over the real store, so a stale process cannot pass for a live one.
+      - name: Start Postgres
+        run: docker compose up --detach --wait postgres
+
+      - name: Drive the generated client against the running service
+        run: uv run poe contract
+
+      - name: Report the stack's logs if the run failed
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop Postgres
+        if: always()
+        run: docker compose down --volumes
+
   container:
     name: container
     runs-on: ubuntu-latest

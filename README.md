@@ -14,10 +14,13 @@ evaluated against committed golden sets.
 
 v0.1 `walking-skeleton`. The scaffold is in place: the seven deployables below each start, resolve
 and validate their configuration, and report it; lint, types and unit tests run locally and in CI.
-The compose stack comes up on one command with no credentials, the simulated surrounding systems serve
-claims out of Postgres, and the container job builds the image, scans it and drives one claim end to
-end through the running stack. The graph, API boundary, guard and audit skeletons, replay model client
-and evaluation harness arrive in the remaining v0.1 tickets.
+The compose stack comes up on one command with no credentials, and the simulated surrounding systems
+now serve the whole contract the pipeline integrates with — policy lookup, claim lookup, claim
+creation, document attachment, status update and party history — from the OpenAPI document that is
+their single source of truth, with a typed client generated from it and contract tests that fail when
+the two disagree. The container job builds the image, scans it and drives one claim end to end through
+the running stack. The graph, API boundary, guard and audit skeletons, replay model client and
+evaluation harness arrive in the remaining v0.1 tickets.
 
 ## Unaffiliated, and synthetic or openly licensed data
 
@@ -46,8 +49,9 @@ uv sync                                    # Python 3.13 is fetched and pinned; 
 uv run poe check                           # lint + types + unit tests — the gate CI runs
 ```
 
-Individual tasks: `uv run poe lint`, `uv run poe types`, `uv run poe unit`, `uv run poe format`. CI
-runs the same three commands as three separate jobs, plus the container job described below.
+Individual tasks: `uv run poe lint`, `uv run poe types`, `uv run poe unit`, `uv run poe format`, plus
+`generate` and `contract` (below). CI runs the first three as three separate jobs, a fourth for the
+contract, and the container job described below.
 
 The stack — Postgres, Qdrant, Redis and the simulated surrounding systems — comes up on one command
 and returns only once every service reports healthy, rather than sleeping and hoping:
@@ -76,14 +80,20 @@ uv run claim-triage-core-sim   # reports it, then serves the simulated systems o
 pyproject.toml          single uv project: dependencies, console scripts, task and tool config
 compose.yaml            the development stack: infrastructure, surrounding systems, image, smoke
 Containerfile           the application image every service in the stack runs from
+contracts/              the OpenAPI document the surrounding systems are defined by
 src/claim_triage/       the shared domain library imported by every deployable
+src/claim_triage/contract/
+                        generated from contracts/: the wire models and the typed client
+src/claim_triage/codegen.py
+                        the generator `uv run poe generate` runs over that document
 src/claim_triage/services/registry.py
                         the deployables as data — name, console script, port, scaling axis, reason
 src/claim_triage/core_sim/
-                        the simulated surrounding systems: claim models, store port, ASGI surface
+                        the simulated surrounding systems: their store, their seed, their ASGI surface
 src/claim_triage/smoke.py
                         one claim end to end through a running stack — what the container job gates on
 tests/                  tests, written at the seams the specification confirms
+tests/contract/         the generated client against a running service, and it against the document
 docs/adr/               architecture decision records
 .github/workflows/      the CI pipeline
 ```
@@ -103,11 +113,44 @@ duplication decision: split only where the scaling axis or the failure domain ge
 |`reviewer-ui`|`claim-triage-reviewer-ui`|8005|human sessions|the human decision surface|
 |`core-sim`|`claim-triage-core-sim`|8080|replica count|stands in for the surrounding insurance systems|
 
-`core-sim` is the one deployable with a surface so far. It serves the simulated surrounding systems —
-`GET /healthz`, `POST /claims`, `GET /claims/{id}`, `POST /claims/{id}/status` — over the `claims`
-table it owns in Postgres. The other six report their configuration and exit until their surfaces
-land. `claim-triage-smoke` is not a deployable: it is the one-shot command that drives a claim through
-a running stack.
+`core-sim` is the one deployable with a surface so far: it serves the contract below out of the tables
+it owns in Postgres. The other six report their configuration and exit until their surfaces land.
+`claim-triage-smoke` is not a deployable: it is the one-shot command that drives a claim through a
+running stack.
+
+## The surrounding systems' contract
+
+`contracts/core-sim.openapi.yaml` is the single source of truth for the simulated surrounding
+insurance systems: the operations the pipeline integrates with — policy lookup, claim creation and
+lookup, status update, document attachment, and reading and recording claim parties — each with an
+`operationId`, one error taxonomy (`ErrorResponse`, whose `code` comes from `ErrorCode`), and an
+`Idempotency-Key` that every write carries and is deduplicated by.
+[ADR 0004](docs/adr/0004-contract-first-surrounding-systems.md) records what those conventions cost and
+why.
+
+`src/claim_triage/contract/` is generated from that document and committed; `core-sim`, the client and
+the tests all speak the generated models, so nothing restates the wire in a second place. `poe generate`
+is the only way that package is written, and the `contract` CI job fails on any change it makes:
+
+```bash
+uv run poe generate    # writes src/claim_triage/contract/ from contracts/core-sim.openapi.yaml
+uv run poe contract    # the generated client against a running service (needs Postgres, below)
+```
+
+`poe contract` is its own job for the same reason it is its own task: it drives a real service over a
+real socket with a real Postgres behind it, and the unit job has none of those. It needs the stack's
+database first:
+
+```bash
+podman compose up --detach --wait postgres
+uv run poe contract
+```
+
+The tests start the service themselves, on a port of their own, so a stale process on 8080 can never
+pass for a live one. What they compare is the shape of the API — routes, operation ids, parameters,
+request and response field sets — projected out of both documents, plus the client's typed behaviour
+over every operation: the exception each documented failure code maps to, and that a write replayed with
+its key is recorded once.
 
 ## Configuration
 
@@ -144,7 +187,7 @@ v0.5, and a cluster — tens of seconds per restart — never becomes the inner 
 
 |Service|Image|Host port|What it is|
 |---|---|---|---|
-|`postgres`|`postgres:17-alpine`|5432|the system of record; `core-sim` owns the `claims` table in it|
+|`postgres`|`postgres:17-alpine`|5432|the system of record; `core-sim` owns its tables in it|
 |`redis`|`redis:8-alpine`|6379|the queue and the checkpointer's backing store, from the graph skeleton on|
 |`qdrant`|`qdrant/qdrant:v1.19.1`|6333|the vector index, from edition-aware retrieval in v0.2|
 |`core-sim`|this repository's image|8080|the simulated surrounding insurance systems|
@@ -154,10 +197,12 @@ Every long-running service has a health check, and a service that needs another 
 (`depends_on: … service_healthy`), so `--wait` returns only once the whole stack has passed. The
 compose file records why each check is an explicit `CMD-SHELL` string rather than an argv list.
 
-`claim-triage-smoke` is what the container job gates on. It submits one claim to the running stack,
-records the status transition the pipeline will record once the graph lands in ticket 04, reads both
-back, and exits 0 only if the claim survived the whole path. Every wait in it is a bounded poll: a
-stack that never answers fails the run instead of hanging it.
+`claim-triage-smoke` is what the container job gates on. It carries one claim through the running stack
+through the generated client of the contract — submit it, record the status transition the pipeline
+will record once the graph lands in ticket 04, read both back — and exits 0 only if the claim survived
+the whole path. Every wait in it is a bounded retry: a stack that never answers fails the run instead
+of hanging it, and retrying a write reuses its idempotency key, so waiting the stack out can never
+duplicate a claim.
 
 The image is built with Podman, and the artefact CI scans is built with:
 
@@ -170,10 +215,13 @@ podman build --squash-all --tag localhost/claim-triage-agent:dev .
 is missing, so the stack can still come up on its own — that image runs identically and only a scan of
 it would differ.
 
-CI runs the same file on the runner's Docker Compose: Podman builds and squashes the image, Trivy
-scans it at HIGH and CRITICAL, `docker load` puts it where Compose looks for it, and the job reports
-success only after the smoke has carried one claim through the stack. `docs/adr/0003` records why the
-two engines differ, and why the image is named `localhost/claim-triage-agent:dev` in both.
+CI runs five jobs. `lint`, `types` and `unit` are the three commands above. `contract` regenerates the
+contract package and fails on any change to it, then drives the generated client against a service it
+starts itself over the runner's Postgres. `container` runs the same compose file on the runner's Docker
+Compose: Podman builds and squashes the image, Trivy scans it at HIGH and CRITICAL, `docker load` puts
+it where Compose looks for it, and the job reports success only after the smoke has carried one claim
+through the stack. `docs/adr/0003` records why the two engines differ, and why the image is named
+`localhost/claim-triage-agent:dev` in both.
 
 ## Licence
 

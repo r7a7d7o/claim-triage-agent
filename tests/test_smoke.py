@@ -5,8 +5,8 @@ HTTP against the real ASGI app — the store and the process boundary are the on
 nothing here waits on a fixed sleep for readiness to become true.
 
 The failures get as much attention as the happy path, because this command is the only thing between
-a broken stack and a green container job: a stack that answers nonsense, or a claim that comes back
-carrying something other than what was submitted, has to end the run non-zero.
+a broken stack and a green container job: a stack that answers nonsense, or refuses the claim,
+has to end the run non-zero with the reason it refused.
 """
 
 from __future__ import annotations
@@ -14,8 +14,10 @@ from __future__ import annotations
 import socket
 import threading
 import time
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import uvicorn
@@ -23,8 +25,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from claim_triage import smoke
+from claim_triage.contract.models import Claim, ClaimStatus, ClaimStatusTransition
 from claim_triage.core_sim.app import create_app
-from support import InMemoryClaims
+from support import InMemoryCoreSim
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -36,20 +39,36 @@ STARTUP_DEADLINE_SECONDS = 10.0
 POLL_SECONDS = 0.01
 """How long to wait between readiness polls: polled for, never assumed after a fixed sleep."""
 
-CLAIM: dict[str, Any] = {
-    "claim_id": str(uuid4()),
-    "status": "received",
-    "policy_number": "SIM-2026-0001",
-    "incident_date": "2026-03-14",
-    "claim_amount_eur": "1840.50",
-    "updated_at": "2026-09-24T12:00:00Z",
-}
+CLAIM_ID: UUID = uuid4()
+"""The claim every scripted answer is about, so one fixture serves every case."""
+
+CLAIM: dict[str, Any] = Claim(
+    claim_id=CLAIM_ID,
+    status=ClaimStatus.RECEIVED,
+    status_history=[
+        ClaimStatusTransition(
+            status=ClaimStatus.RECEIVED, recorded_at=datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+        )
+    ],
+    policy_number="SIM-2026-0001",
+    incident_date=date(2026, 3, 14),
+    claim_amount_eur=Decimal("1840.50"),
+).model_dump(mode="json")
 """What a well-behaved surrounding system answers with, for tests about the answers themselves."""
+
+TRIAGED: dict[str, Any] = {
+    **CLAIM,
+    "status": ClaimStatus.TRIAGED.value,
+    "status_history": [
+        *CLAIM["status_history"],
+        {"status": ClaimStatus.TRIAGED.value, "recorded_at": "2026-09-24T12:00:01Z"},
+    ],
+}
 
 
 @pytest.fixture
-def claims() -> InMemoryClaims:
-    return InMemoryClaims()
+def systems() -> InMemoryCoreSim:
+    return InMemoryCoreSim()
 
 
 @pytest.fixture
@@ -77,52 +96,49 @@ def serve() -> Iterator[Callable[[FastAPI], str]]:
 
 
 @pytest.fixture
-def base_url(serve: Callable[[FastAPI], str], claims: InMemoryClaims) -> str:
+def base_url(serve: Callable[[FastAPI], str], systems: InMemoryCoreSim) -> str:
     """The surrounding systems, served for real on a loopback port."""
-    return serve(create_app(claims))
+    return serve(create_app(systems))
+
+
+@pytest.fixture(autouse=True)
+def poll_quickly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retry immediately: the wait between attempts is what the deadline is for, not the test."""
+    monkeypatch.setattr(smoke, "POLL_SECONDS", POLL_SECONDS)
 
 
 def test_one_claim_reaches_the_surrounding_systems(
-    base_url: str, claims: InMemoryClaims, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    base_url: str, systems: InMemoryCoreSim, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _pointed_at(monkeypatch, tmp_path, base_url)
 
     assert smoke.main() == 0
 
-    assert len(claims.claims) == 1
-    assert claims.claims[0].status == "triaged"
+    assert len(systems.claims) == 1
+    assert systems.claims[0].status == ClaimStatus.TRIAGED
 
 
 def test_the_smoke_waits_out_a_stack_that_is_not_ready_yet(
     serve: Callable[[FastAPI], str], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    starting: tuple[int, object] = (503, {"detail": "starting"})
+    starting: tuple[int, object] = (
+        503,
+        {"code": "service_unavailable", "detail": "the claims are unreachable"},
+    )
     scripted = ScriptedStack(
         starting,
         starting,
+        (200, {"status": "ok"}),
         (201, CLAIM),
         (200, CLAIM),
-        (200, {**CLAIM, "status": "triaged"}),
-        (200, {**CLAIM, "status": "triaged"}),
+        (200, TRIAGED),
+        (200, TRIAGED),
     )
     _pointed_at(monkeypatch, tmp_path, serve(scripted.app()))
 
     assert smoke.main() == 0
 
-    assert scripted.paths[:3] == ["POST /claims", "POST /claims", "POST /claims"]
-
-
-def test_an_answer_outside_the_contract_fails_the_run(
-    base_url: str,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _pointed_at(monkeypatch, tmp_path, f"{base_url}/not-the-route")
-
-    assert smoke.main() == 1
-
-    assert "smoke failed" in capsys.readouterr().err
+    assert scripted.paths[:3] == ["GET /healthz", "GET /healthz", "GET /healthz"]
 
 
 def test_a_stack_that_never_answers_fails_the_run(
@@ -133,18 +149,32 @@ def test_a_stack_that_never_answers_fails_the_run(
 
     assert smoke.main() == 1
 
-    assert "unreachable" in capsys.readouterr().err
+    assert "did not answer in time" in capsys.readouterr().err
+
+
+def test_a_refused_write_fails_the_run(
+    serve: Callable[[FastAPI], str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    refusal = {"code": "invalid_payload", "detail": "body.claim_amount_eur: greater than 0"}
+    scripted = ScriptedStack((200, {"status": "ok"}), (422, refusal))
+    _pointed_at(monkeypatch, tmp_path, serve(scripted.app()))
+
+    assert smoke.main() == 1
+
+    assert "invalid_payload" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     ("answer", "expected"),
     [
-        ((201, "not json at all"), "non-JSON"),
-        ((201, ["a list, not an object"]), "not an object"),
-        ((202, CLAIM), "expected [201]"),
-        ((201, {**CLAIM, "status": "paid"}), "expected status='received'"),
+        ((201, "not json at all"), "answered non-JSON"),
+        ((201, {**CLAIM, "status": "paid"}), "the contract does not cover"),
+        ((202, CLAIM), "outside the contract"),
     ],
-    ids=["body-not-json", "body-not-an-object", "unexpected-status", "wrong-claim-status"],
+    ids=["body-not-json", "status-outside-the-contract", "unexpected-status"],
 )
 def test_an_answer_the_contract_does_not_allow_fails_the_run(
     serve: Callable[[FastAPI], str],
@@ -154,7 +184,8 @@ def test_an_answer_the_contract_does_not_allow_fails_the_run(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _pointed_at(monkeypatch, tmp_path, serve(ScriptedStack(answer).app()))
+    scripted = ScriptedStack((200, {"status": "ok"}), answer)
+    _pointed_at(monkeypatch, tmp_path, serve(scripted.app()))
 
     assert smoke.main() == 1
 

@@ -1,43 +1,56 @@
 """Prove the running stack can carry one claim end to end, from inside the stack.
 
 Until ticket 04 wires the graph, this command stands in for the `triager`: it submits a claim to the
-simulated surrounding systems over the compose network, records the status transition the pipeline
-will later record, and reads both back. It exits 0 only once the claim has survived the whole path,
-so the container job cannot report success on containers merely being up.
+simulated surrounding systems through the client generated from their contract, records the status
+transition the pipeline will later record, and reads both back. It exits 0 only once the claim has
+survived the whole path, so the container job cannot report success on containers merely being up.
 
-Every wait is a bounded poll against a deadline: an unreachable service or a 503 means the stack is
-not ready yet, and anything else is a failure this command reports and exits 1 on.
+Every wait is a bounded retry against a deadline: systems that are not ready yet, or not reachable
+yet, are waited out, while anything the contract does not allow ends the run with its reason. A
+retry reuses the write's idempotency key, so waiting the stack out can never duplicate a claim.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 import time
-from typing import TYPE_CHECKING, Any, Final
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from datetime import date
+from decimal import Decimal
+from typing import TYPE_CHECKING, Final
+from uuid import uuid4
 
 from claim_triage.config import InfrastructureSettings
+from claim_triage.contract.client import (
+    CoreSimClient,
+    CoreSimError,
+    CoreSimUnreachable,
+    ServiceUnavailableError,
+)
+from claim_triage.contract.models import (
+    Claim,
+    ClaimStatus,
+    ClaimStatusUpdate,
+    ClaimSubmission,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable
 
 DEADLINE_SECONDS: Final = 120.0
 """How long the stack may take to carry the claim before this run fails."""
 
 POLL_SECONDS: Final = 0.25
-"""How long to wait between readiness polls: readiness is polled for, never assumed by sleeping."""
+"""How long to wait between attempts: readiness is waited out, never assumed by sleeping."""
 
 REQUEST_TIMEOUT_SECONDS: Final = 5.0
-"""How long one HTTP attempt may take before the service counts as unreachable."""
+"""How long one call may take before the systems count as unreachable."""
 
-SUBMISSION: Final[dict[str, Any]] = {
-    "policy_number": "SIM-2026-0001",
-    "incident_date": "2026-03-14",
-    "claim_amount_eur": "1840.50",
-}
-"""The one claim this smoke run submits.
+SUBMISSION: Final = ClaimSubmission(
+    policy_number="SIM-2026-0001",
+    incident_date=date(2026, 3, 14),
+    claim_amount_eur=Decimal("1840.50"),
+)
+"""The one claim this smoke run submits, against one of the policies the systems hold.
 
 A literal, not a generated document: ticket 13 generates the synthetic claim corpus, and this claim
 exists only to prove the stack moves one from end to end.
@@ -55,21 +68,34 @@ def main() -> int:
     started = time.monotonic()
 
     try:
-        submitted = _call(base_url, "POST", "/claims", deadline, body=SUBMISSION, creates=True)
-        claim_id = str(submitted["claim_id"])
-        _expect(submitted, "status", "received")
-        amount = submitted["claim_amount_eur"]
-        print(f"submitted claim {claim_id}: status received, amount {amount}")
+        with CoreSimClient(base_url, timeout=REQUEST_TIMEOUT_SECONDS) as client:
+            _retried(client.read_readiness, deadline)
+            key = f"smoke-{uuid4()}"
+            submitted = _retried(
+                lambda: client.create_claim(SUBMISSION, idempotency_key=key), deadline
+            )
+            _expect(submitted, ClaimStatus.RECEIVED)
+            print(f"submitted claim {submitted.claim_id}: status received")
 
-        stored = _call(base_url, "GET", f"/claims/{claim_id}", deadline)
-        _expect(stored, "status", "received")
-        print(f"read claim {claim_id} back from the stack: status received")
+            stored = _retried(lambda: client.read_claim(submitted.claim_id), deadline)
+            _expect(stored, ClaimStatus.RECEIVED)
+            print(f"read claim {submitted.claim_id} back from the stack: status received")
 
-        _call(base_url, "POST", f"/claims/{claim_id}/status", deadline, body={"status": "triaged"})
+            _retried(
+                lambda: client.record_claim_status(
+                    submitted.claim_id,
+                    ClaimStatusUpdate(status=ClaimStatus.TRIAGED),
+                    idempotency_key=f"{key}-triaged",
+                ),
+                deadline,
+            )
 
-        settled = _call(base_url, "GET", f"/claims/{claim_id}", deadline)
-        _expect(settled, "status", "triaged")
-        print(f"recorded and read back status triaged for claim {claim_id}")
+            settled = _retried(lambda: client.read_claim(submitted.claim_id), deadline)
+            _expect(settled, ClaimStatus.TRIAGED)
+            print(f"recorded and read back status triaged for claim {submitted.claim_id}")
+    except CoreSimError as refused:
+        print(f"smoke failed: {refused}", file=sys.stderr)
+        return 1
     except SmokeFailed as failure:
         print(f"smoke failed: {failure}", file=sys.stderr)
         return 1
@@ -79,60 +105,14 @@ def main() -> int:
     return 0
 
 
-def _call(
-    base_url: str,
-    method: str,
-    path: str,
-    deadline: float,
-    *,
-    body: Mapping[str, Any] | None = None,
-    creates: bool = False,
-) -> dict[str, Any]:
-    """One call against the stack, polling while it is not ready and failing on any other answer."""
-    payload = None if body is None else json.dumps(body).encode()
-    request = Request(
-        f"{base_url}{path}",
-        data=payload,
-        method=method,
-        headers={"content-type": "application/json"} if payload is not None else {},
-    )
-    expected = {201} if creates else {200}
-
+def _retried[T](call: Callable[[], T], deadline: float) -> T:
+    """One call, retried while the stack is not up yet, and given up on past the deadline."""
     while True:
         try:
-            status_code, document = _attempt(request)
-        except HTTPError as refused:
-            if refused.code == 503 and _wait_for_another_attempt(deadline):
-                continue
-            raise SmokeFailed(
-                f"{method} {request.full_url} answered {refused.code} {refused.reason}:"
-                f" {_body(refused)}"
-            ) from None
-        except (URLError, OSError) as unreachable:
-            if _wait_for_another_attempt(deadline):
-                continue
-            raise SmokeFailed(f"{method} {request.full_url} unreachable: {unreachable}") from None
-
-        if status_code not in expected:
-            raise SmokeFailed(
-                f"{method} {request.full_url} answered {status_code}, expected {sorted(expected)}"
-            )
-        return document
-
-
-def _attempt(request: Request) -> tuple[int, dict[str, Any]]:
-    """Perform one HTTP attempt, requiring an object back."""
-    with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-        status_code = response.status
-        body = response.read().decode(errors="replace")
-
-    try:
-        document = json.loads(body)
-    except ValueError as not_json:
-        raise SmokeFailed(f"{request.full_url} answered non-JSON: {not_json}") from None
-    if not isinstance(document, dict):
-        raise SmokeFailed(f"{request.full_url} answered {type(document).__name__}, not an object")
-    return status_code, document
+            return call()
+        except (ServiceUnavailableError, CoreSimUnreachable) as not_ready:
+            if not _wait_for_another_attempt(deadline):
+                raise SmokeFailed(f"the stack did not answer in time: {not_ready}") from None
 
 
 def _wait_for_another_attempt(deadline: float) -> bool:
@@ -143,11 +123,6 @@ def _wait_for_another_attempt(deadline: float) -> bool:
     return True
 
 
-def _expect(document: Mapping[str, Any], field: str, value: str) -> None:
-    if document.get(field) != value:
-        got = document.get(field)
-        raise SmokeFailed(f"expected {field}={value!r}, got {got!r} in {dict(document)}")
-
-
-def _body(refused: HTTPError) -> str:
-    return refused.read().decode(errors="replace")[:200]
+def _expect(claim: Claim, status: ClaimStatus) -> None:
+    if claim.status != status:
+        raise SmokeFailed(f"expected claim {claim.claim_id} to be {status}, got {claim.status}")

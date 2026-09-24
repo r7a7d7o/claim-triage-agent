@@ -11,6 +11,7 @@ license = "Apache-2.0"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi>=0.116",
+    "httpx2>=2.13.1",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
     "uvicorn>=0.35",
@@ -29,9 +30,9 @@ claim-triage-smoke = "claim_triage.smoke:main"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13.1",
     "mypy>=1.13",
     "poethepoet>=0.30",
+    "pyyaml>=6.0",
     "pytest>=8.3",
     "ruff>=0.9",
 ]
@@ -46,6 +47,10 @@ packages = ["src/claim_triage"]
 lint = { shell = "ruff check . && ruff format --check ." }
 types = "mypy src tests"
 unit = "pytest"
+# The contract tests need a running service and a real Postgres; the unit job must not collect them.
+contract = "pytest -m contract"
+# The contract package is generated from contracts/core-sim.openapi.yaml, and committed.
+generate = "python -m claim_triage.codegen"
 check = ["lint", "types", "unit"]
 format = { shell = "ruff check --fix . && ruff format ." }
 
@@ -67,6 +72,14 @@ plugins = ["pydantic.mypy"]
 module = "pydantic_settings.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# PyYAML ships no type information; the generator and the contract tests read documents through it.
+module = "yaml.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# The contract tests drive a running service and a real Postgres, so the default run leaves them out
+# and `poe contract` is what asks for them.
+addopts = "-q -m 'not contract'"
+markers = ["contract: drives the generated client against a running core-sim (poe contract)"]
