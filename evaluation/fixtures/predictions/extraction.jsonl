@@ -1,0 +1,3 @@
+{"case_id": "synthetic-notification-0001", "answer": {"fields": {"policy_number": "SIM-2026-0001", "incident_date": "2026-03-14", "claim_amount_eur": "1840.50", "registration_plate": "BL-123XY"}}}
+{"case_id": "synthetic-notification-0002", "answer": {"fields": {"policy_number": "SIM-2026-0001", "incident_date": "2026-02-03", "claim_amount_eur": "3120.00", "registration_plate": "BL-456AB"}}}
+{"case_id": "synthetic-notification-0003", "answer": {"fields": {"policy_number": "SIM-2025-0417", "incident_date": "2025-11-21", "claim_amount_eur": "475.90"}}}

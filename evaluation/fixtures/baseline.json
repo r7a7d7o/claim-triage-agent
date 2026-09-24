@@ -1,0 +1,40 @@
+{
+  "tag": "fixtures",
+  "settings": {
+    "top_k": 5
+  },
+  "sets": {
+    "extraction": {
+      "version": 1,
+      "cases": 3
+    },
+    "retrieval": {
+      "version": 1,
+      "cases": 3
+    },
+    "classification": {
+      "version": 1,
+      "cases": 4
+    }
+  },
+  "metrics": {
+    "extraction.precision": 1.0,
+    "extraction.recall": 1.0,
+    "extraction.f1": 1.0,
+    "extraction.field.claim_amount_eur.f1": 1.0,
+    "extraction.field.incident_date.f1": 1.0,
+    "extraction.field.policy_number.f1": 1.0,
+    "extraction.field.registration_plate.f1": 1.0,
+    "retrieval.hit_rate": 1.0,
+    "retrieval.mrr": 0.833333,
+    "retrieval.citation_validity": 1.0,
+    "classification.fraud_risk.precision": 1.0,
+    "classification.fraud_risk.recall": 1.0,
+    "classification.fraud_risk.f1": 1.0,
+    "classification.severity.precision": 1.0,
+    "classification.severity.recall": 1.0,
+    "classification.severity.f1": 1.0,
+    "classification.routing_accuracy": 1.0,
+    "classification.fraud_pr_auc": 1.0
+  }
+}

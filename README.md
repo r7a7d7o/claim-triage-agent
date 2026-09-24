@@ -27,7 +27,11 @@ with a replay adapter and a provider adapter, selected by configuration, so noth
 to run — no stage asks it for anything yet, which is what v0.2's extraction does. The guard seam is in
 place: the entry point screens the documents of a submission — content type, size, page count,
 encryption and archive expansion — refuses a caller past its burst, and records the verdicts that let
-a claim in on the run and in its audit entry. The evaluation harness arrives in the last v0.1 ticket.
+a claim in on the run and in its audit entry. The evaluation seam is in place: three golden-set
+formats, a metric table, baselines per release tag, and a gate whose four declared rules are the only
+way a run exits non-zero — with the sets themselves empty placeholders, and fixture material that
+makes CI refuse a regression on every pull request. Nothing is intelligent yet, which is v0.2's
+extraction.
 
 ## Unaffiliated, and synthetic or openly licensed data
 
@@ -57,8 +61,9 @@ uv run poe check                           # lint + types + unit tests — the g
 ```
 
 Individual tasks: `uv run poe lint`, `uv run poe types`, `uv run poe unit`, `uv run poe format`, plus
-`generate`, `contract`, `postgres` and `provider` (below). CI runs the first three as three separate
-jobs, a fourth for the contract and the audit transaction, and the container job described below.
+`generate`, `contract`, `postgres`, `provider` and `eval` (below). CI runs the first three as three
+separate jobs, a fourth for the contract and the audit transaction, a fifth for the evaluation gate,
+and the container job described below.
 
 The stack — Postgres, Qdrant, Redis and the simulated surrounding systems — comes up on one command
 and returns only once every service reports healthy, rather than sleeping and hoping:
@@ -110,6 +115,8 @@ compose.yaml            the development stack: infrastructure, surrounding syste
 Containerfile           the application image every service in the stack runs from
 contracts/              the OpenAPI document the surrounding systems are defined by
 observability/          the tracing backend of the stack, under the `observability` profile
+evaluation/             the golden sets, the declared gate rules, the baselines per release tag, and
+                        the fixture material the evaluation CI job injects a regression into
 src/claim_triage/       the shared domain library imported by every deployable
 src/claim_triage/contract/
                         generated from contracts/: the wire models and the typed client
@@ -134,6 +141,9 @@ src/claim_triage/model/
                         fixtures the replay adapter answers from, and the one place that selects
                         between them
 src/claim_triage/api/   the entry point's ASGI surface
+src/claim_triage/evaluation/
+                        the evaluation harness: the set formats, the metrics, the gate, the per-tag
+                        baseline store, and the runner behind `uv run poe eval`
 src/claim_triage/smoke.py
                         one claim end to end through a running stack — what the container job gates on
 tests/                  tests, written at the seams the specification confirms
@@ -349,6 +359,46 @@ provider adapter is selected by configuration and never exercised in CI, which i
 for: everything that drives it carries the `provider` marker, the default run leaves those out, and
 `uv run poe provider` is what asks for them. They drive it against a socket on loopback they serve
 themselves — no provider, no credential, and nothing that leaves the machine.
+
+## The evaluation seam
+
+Three capabilities are scored against committed golden sets, and one command does it:
+
+```bash
+uv run poe eval            # the committed sets, against the release tag's own baseline
+uv run poe eval-fixtures   # the harness's own exercise set, against the baseline it recorded
+```
+
+`claim-triage-eval` prints a metric table — one row per metric per capability, with the value, the
+baseline it was compared to, the difference and the verdict — and leaves non-zero only through the
+rules `evaluation/gate.json` declares: a **degradation** of more than two points below the tag's
+baseline, a metric under its absolute **floor** (citation validity carries one, and no rules file may
+leave it out), a **coverage** failure when a metric the baseline records is not measured or a set has
+lost cases against the tag's record of it, and an **incomparable** baseline recorded under other
+settings or for another version of a set. Exit `1` means one of those fired, exit `2` means the run
+could not be made at all, and nothing else is non-zero. A capability the build does not answer yet is
+reported as `not implemented` rather than scored zero.
+
+The three sets are JSONL, one file per capability: a header naming the capability, the version and
+what the set is for, then one case per line. They are **placeholders** — the format, the version, no
+case — because the cases are the document-intake increment's work (ticket 14). Baselines are committed
+one file per release tag (`evaluation/baselines/v0.1.0.json`); `uv run poe eval --record` writes the
+tag's own after judging against the old one, and refuses to write a run that broke a rule against the
+baseline it holds — a baseline is a release record, not a moving average.
+
+Everything that reads, scores and judges those sets is exercised: `evaluation/fixtures/` holds the
+same three formats with cases, the answers of a build at the quality its baseline records, and the
+same build regressed past both rules. The evaluation CI job scores the first, then installs the
+regressed answers over a copy and fails unless the gate refuses them with exit `1` — a gate that
+refused everything would fail the step before it. The build's answers arrive through one seam
+(`claim_triage.evaluation.build`), which the increment implementing a capability fills — the entries
+and the tickets they arrive with are listed there and in `docs/adr/0008`. Answers can also be read
+from a recorded directory (`--predictions`), which is how a run is re-scored without the build and how
+the CI job injects its regression.
+
+The formats, every metric's meaning, the declared rules and the fixture material are documented where
+the material is: [`evaluation/README.md`](evaluation/README.md). `docs/adr/0008` records the decision
+and what the placeholder sets cost.
 
 ## Configuration
 
