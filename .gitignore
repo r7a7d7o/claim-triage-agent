@@ -1,0 +1,39 @@
+# Excluded on purpose: vendored corpus, this repo's tracker, corpus guidelines
+.agents/skills/
+.scratch/
+AGENTS.md
+docs/agents/
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Local tool state
+.claude/settings.local.json
+*.log
+
+# Sample datasets: the full files stay out of git (they are tens of MB and their upstream terms are
+# recorded in THIRD_PARTY_NOTICES.md); ticket 13 fetches them by a checksum-pinned script.
+sample/*.csv
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
