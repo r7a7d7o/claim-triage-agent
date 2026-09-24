@@ -37,19 +37,24 @@ INFRASTRUCTURE_VARIABLES = (
     "REDIS_URL",
     "QDRANT_URL",
     "CORE_SIM_BASE_URL",
+    "API_BASE_URL",
+    "TRIAGER_BASE_URL",
     "OTEL_ENDPOINT",
     "LANGFUSE_HOST",
 )
 
-REPORTS_AND_EXITS: tuple[tuple[str, str, int, str], ...] = tuple(
-    row for row in CONTRACT if row[0] != "core-sim"
-)
-"""The deployables that report their configuration and exit.
+SERVES: tuple[str, ...] = ("core-sim", "triager", "api")
+"""The deployables that serve a surface, so their console scripts run until they are stopped.
 
-`core-sim` left this list in ticket 02: it serves the simulated surrounding systems' ASGI surface,
-so its console script runs until it is stopped. `tests/test_core_sim.py` drives that surface, and
-`test_serving_deployable_reports_before_it_serves` checks it still reports first.
+`core-sim` joined in ticket 02, `triager` and `api` in ticket 04: the graph, its records and the
+entry point in front of them. What each one serves is driven by its own test module, and
+`test_serving_deployable_reports_before_it_serves` checks they all report before they serve.
 """
+
+REPORTS_AND_EXITS: tuple[tuple[str, str, int, str], ...] = tuple(
+    row for row in CONTRACT if row[0] not in SERVES
+)
+"""The deployables whose surface has not landed: they report their configuration and exit."""
 
 
 def _isolated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **overrides: str) -> None:
@@ -116,22 +121,26 @@ def test_deployable_starts_and_reports_its_configuration(
     assert report["qdrant_url"] == "http://localhost:6333"
 
 
+@pytest.mark.parametrize("name", SERVES)
 def test_serving_deployable_reports_before_it_serves(
+    name: str,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_CORE_SIM_HOST="0.0.0.0")
+    default_port = deployable(name).default_port
+    host_variable = f"CLAIM_TRIAGE_{name.upper().replace('-', '_')}_HOST"
+    _isolated(monkeypatch, tmp_path, **{host_variable: "0.0.0.0"})
 
-    resolution, exit_code = resolve_and_report("core-sim")
+    resolution, exit_code = resolve_and_report(name)
 
     assert exit_code == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["service"] == "core-sim"
+    assert report["service"] == name
     assert report["host"] == "0.0.0.0"
-    assert report["port"] == 8080
+    assert report["port"] == default_port
     assert resolution is not None
-    assert (resolution.host, resolution.port) == ("0.0.0.0", 8080)
+    assert (resolution.host, resolution.port) == ("0.0.0.0", default_port)
 
 
 def test_environment_overrides_win_and_credentials_are_masked(
@@ -143,16 +152,17 @@ def test_environment_overrides_win_and_credentials_are_masked(
     _isolated(
         monkeypatch,
         tmp_path,
-        CLAIM_TRIAGE_API_PORT="9123",
+        CLAIM_TRIAGE_EXTRACTION_PORT="9123",
         CLAIM_TRIAGE_QDRANT_URL="http://qdrant.internal:6333",
         CLAIM_TRIAGE_POSTGRES_DSN=dsn,
     )
 
-    assert _console_script("claim-triage-api")() == 0
+    assert _console_script("claim-triage-extraction")() == 0
     captured = capsys.readouterr().out
 
     report = json.loads(captured)
     assert report["port"] == 9123
+    assert report["triager_base_url"] == "http://localhost:8001"
     assert report["qdrant_url"] == "http://qdrant.internal:6333"
     assert report["postgres_dsn"] != dsn
     assert "s3cret" not in captured
@@ -163,8 +173,28 @@ def test_rejected_configuration_names_the_variable(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_API_PORT="not-a-port")
+    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_EXTRACTION_PORT="not-a-port")
 
-    assert _console_script("claim-triage-api")() == 2
+    assert _console_script("claim-triage-extraction")() == 2
 
-    assert "CLAIM_TRIAGE_API_PORT" in capsys.readouterr().err
+    assert "CLAIM_TRIAGE_EXTRACTION_PORT" in capsys.readouterr().err
+
+
+def test_an_empty_observability_endpoint_means_the_stack_is_down(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Compose passes its own variables through as empty strings; empty means unset, not ""."""
+    _isolated(
+        monkeypatch,
+        tmp_path,
+        CLAIM_TRIAGE_OTEL_ENDPOINT="",
+        CLAIM_TRIAGE_LANGFUSE_HOST="",
+    )
+
+    assert _console_script("claim-triage-extraction")() == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["otel_endpoint"] is None
+    assert report["langfuse_host"] is None

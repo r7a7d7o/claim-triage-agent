@@ -19,6 +19,7 @@ from fastapi import FastAPI, Header, Path, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from claim_triage import boundary
 from claim_triage.contract.models import (
     Claim,
     ClaimDocument,
@@ -97,26 +98,30 @@ def create_app(store: CoreSimStore) -> FastAPI:
 
     @app.exception_handler(ClaimNotFound)
     def unknown_claim(_request: Request, missing: ClaimNotFound) -> JSONResponse:
-        return _refusal(status.HTTP_404_NOT_FOUND, ErrorCode.CLAIM_NOT_FOUND, str(missing))
+        return boundary.refusal(status.HTTP_404_NOT_FOUND, ErrorCode.CLAIM_NOT_FOUND, str(missing))
 
     @app.exception_handler(PolicyNotFound)
     def unknown_policy(_request: Request, missing: PolicyNotFound) -> JSONResponse:
-        return _refusal(status.HTTP_404_NOT_FOUND, ErrorCode.POLICY_NOT_FOUND, str(missing))
+        return boundary.refusal(status.HTTP_404_NOT_FOUND, ErrorCode.POLICY_NOT_FOUND, str(missing))
 
     @app.exception_handler(IdempotencyKeyReuse)
     def reused_key(_request: Request, reused: IdempotencyKeyReuse) -> JSONResponse:
-        return _refusal(status.HTTP_409_CONFLICT, ErrorCode.IDEMPOTENCY_KEY_REUSE, str(reused))
+        return boundary.refusal(
+            status.HTTP_409_CONFLICT, ErrorCode.IDEMPOTENCY_KEY_REUSE, str(reused)
+        )
 
     @app.exception_handler(RequestValidationError)
     def outside_the_contract(_request: Request, invalid: RequestValidationError) -> JSONResponse:
         """Every rejected field and every missing header answers in the contract's error shape."""
-        return _refusal(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.INVALID_PAYLOAD, _locations(invalid)
+        return boundary.refusal(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            ErrorCode.INVALID_PAYLOAD,
+            boundary.rejected_locations(invalid),
         )
 
     @app.exception_handler(ServiceUnavailable)
     def unreachable(_request: Request, failure: ServiceUnavailable) -> JSONResponse:
-        return _refusal(
+        return boundary.refusal(
             status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.SERVICE_UNAVAILABLE, str(failure)
         )
 
@@ -212,19 +217,3 @@ def create_app(store: CoreSimStore) -> FastAPI:
         return store.record_party(claim_id, party, idempotency_key)
 
     return app
-
-
-def _refusal(status_code: int, code: ErrorCode, detail: str) -> JSONResponse:
-    """One error shape for every failure, in the contract's own model."""
-    return JSONResponse(
-        content=ErrorResponse(code=code, detail=detail).model_dump(mode="json"),
-        status_code=status_code,
-    )
-
-
-def _locations(invalid: RequestValidationError) -> str:
-    """What exactly was wrong: one rejected location per statement, naming the field."""
-    return "; ".join(
-        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
-        for error in invalid.errors()
-    )

@@ -1,15 +1,23 @@
-"""Test doubles, at the boundaries the specification names.
+"""Test doubles, at the boundaries the specification names, and the ways a test serves an app.
 
 The surrounding systems are one of those boundaries: the real implementation is the Postgres tables
-`core-sim` owns, which the contract job exercises through the running service. The double here keeps
-what the systems hold in dictionaries and answers in exactly the shapes the store port promises —
-nothing more, so a test cannot pass on behaviour the database would not have. It fingerprints writes
-through the same function the Postgres store does, so the two cannot disagree about what counts as
-the same request.
+`core-sim` owns, which the contract job exercises through the running service. The triager's tables
+are the other: the real implementation is the Postgres store the pipeline records through, held to
+the same promise by `tests/test_audit_transaction.py`, which needs the database the unit job has
+none of. Both doubles keep what they hold in dictionaries and answer in exactly the shapes their
+ports promise — nothing more, so a test cannot pass on behaviour the database would not have. Both
+fingerprint writes through the same functions the stores do, so the two cannot disagree about what
+counts as the same request, or about what an entry hashes to.
+
+`free_port` and `wait_until_listening` are what serving an app for real needs, and live here rather
+than in one test module because more than one test module serves one.
 """
 
 from __future__ import annotations
 
+import socket
+import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
@@ -32,9 +40,19 @@ from claim_triage.core_sim.store import (
     PolicyNotFound,
     request_fingerprint,
 )
+from claim_triage.triage import audit
+from claim_triage.triage.audit import AuditEntry, AuditEntryContent
+from claim_triage.triage.run import TriageRun
+from claim_triage.triage.store import TriageStoreUnavailable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
+
+STARTUP_DEADLINE_SECONDS: float = 10.0
+"""How long a served app may take to accept connections before a test fails."""
+
+LISTEN_POLL_SECONDS: float = 0.01
+"""How long to wait between connection attempts: polled for, never assumed after a fixed sleep."""
 
 Remembered = dict[str, object]
 """One recorded write: the fingerprint of its request, and the response it answered with."""
@@ -162,3 +180,86 @@ class InMemoryCoreSim:
         written = perform()
         self._remembered[key] = {"fingerprint": fingerprint, "response": written}
         return written
+
+
+def free_port() -> int:
+    """A port nothing is listening on right now, for a test to serve an app on."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def wait_until_listening(port: int) -> None:
+    """Wait until something accepts connections on `port`, failing rather than sleeping forever."""
+    deadline = time.monotonic() + STARTUP_DEADLINE_SECONDS
+    while time.monotonic() < deadline:
+        with socket.socket() as probe:
+            if probe.connect_ex(("127.0.0.1", port)) == 0:
+                return
+        time.sleep(LISTEN_POLL_SECONDS)
+    raise AssertionError(f"nothing listened on 127.0.0.1:{port} within {STARTUP_DEADLINE_SECONDS}s")
+
+
+class InMemoryTriageStore:
+    """A `TriageStore` over dictionaries, with the Postgres one's transaction semantics.
+
+    The transaction is real in the only way a dictionary can hold one: everything it writes is taken
+    back when anything inside it raises, so a test can force a failure between the state change and
+    the audit entry and observe that neither survives. The chain is appended through the same
+    function the Postgres store appends through, so the two cannot disagree about what an entry
+    hashes to.
+    """
+
+    def __init__(self, *, ready: bool = True) -> None:
+        self._ready = ready
+        self._runs: dict[UUID, TriageRun] = {}
+        self._entries: list[AuditEntry] = []
+
+    @property
+    def runs(self) -> tuple[TriageRun, ...]:
+        """What has been recorded, for tests that assert on the outcome."""
+        return tuple(self._runs.values())
+
+    def ready(self) -> bool:
+        return self._ready
+
+    def read_run(self, run_id: UUID) -> TriageRun | None:
+        return self._runs.get(run_id)
+
+    def entries(self) -> tuple[AuditEntry, ...]:
+        return tuple(self._entries)
+
+    @contextmanager
+    def transaction(self) -> Iterator[InMemoryTriageTransaction]:
+        """Everything this transaction writes, or nothing: what the store's port promises."""
+        held = (dict(self._runs), list(self._entries))
+        try:
+            yield InMemoryTriageTransaction(self)
+        except BaseException:
+            self._runs, self._entries = held
+            raise
+
+    def _record(self, run: TriageRun) -> None:
+        if run.run_id in self._runs:
+            raise TriageStoreUnavailable(f"run {run.run_id} is already recorded")
+        self._runs[run.run_id] = run
+
+    def _append(self, content: AuditEntryContent) -> AuditEntry:
+        last = None if not self._entries else (self._entries[-1].seq, self._entries[-1].hash)
+        seq, prev_hash = audit.continues(last)
+        entry = audit.append(prev_hash, seq, content)
+        self._entries.append(entry)
+        return entry
+
+
+class InMemoryTriageTransaction:
+    """One transaction over the dictionary store: both writes, or neither."""
+
+    def __init__(self, store: InMemoryTriageStore) -> None:
+        self._store = store
+
+    def record_run(self, run: TriageRun) -> None:
+        self._store._record(run)
+
+    def append_entry(self, content: AuditEntryContent) -> AuditEntry:
+        return self._store._append(content)

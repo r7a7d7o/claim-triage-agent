@@ -16,6 +16,9 @@
 # compose provider under Podman: a `CMD` list whose elements contain spaces is re-split on whitespace,
 # which turns `python -c "<script>"` into a syntax error, and it turns a check that happens to still
 # parse into one that exits 0 for the wrong reason.
+#
+# The observability profile is opt-in: with it down, the pipeline runs exactly as it does with it up,
+# on structured logs, which is what the smoke run and every CI job do.
 
 name: claim-triage-agent
 
@@ -108,6 +111,79 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  triager:
+    # The graph and its records. It owns the run and audit tables, and reaches nobody else's.
+    image: localhost/claim-triage-agent:dev
+    build:
+      context: .
+      dockerfile: Containerfile
+    command: ["claim-triage-triager"]
+    environment:
+      CLAIM_TRIAGE_ENVIRONMENT: local
+      CLAIM_TRIAGE_POSTGRES_DSN: postgresql://claim_triage:claim_triage@postgres:5432/claim_triage
+      CLAIM_TRIAGE_CORE_SIM_BASE_URL: http://core-sim:8080
+      CLAIM_TRIAGE_TRIAGER_HOST: 0.0.0.0
+      # Empty unless the observability profile is up: unset means traces go to the logs only, and an
+      # empty value means the same thing (see `claim_triage.config`).
+      CLAIM_TRIAGE_OTEL_ENDPOINT: ${CLAIM_TRIAGE_OTEL_ENDPOINT:-}
+    ports:
+      - "127.0.0.1:${CLAIM_TRIAGE_TRIAGER_HOST_PORT:-8001}:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      core-sim:
+        condition: service_healthy
+    healthcheck:
+      # Readiness for this service is its own store being reachable.
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3)"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  api:
+    # The entry point: stateless, and ready when the triager behind it is.
+    image: localhost/claim-triage-agent:dev
+    build:
+      context: .
+      dockerfile: Containerfile
+    command: ["claim-triage-api"]
+    environment:
+      CLAIM_TRIAGE_ENVIRONMENT: local
+      CLAIM_TRIAGE_TRIAGER_BASE_URL: http://triager:8001
+      CLAIM_TRIAGE_API_HOST: 0.0.0.0
+      CLAIM_TRIAGE_OTEL_ENDPOINT: ${CLAIM_TRIAGE_OTEL_ENDPOINT:-}
+    ports:
+      - "127.0.0.1:${CLAIM_TRIAGE_API_HOST_PORT:-8000}:8000"
+    depends_on:
+      triager:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  otel-collector:
+    # The tracing backend: OTLP in, and the spans it received on stdout. Profile-gated, so the stack
+    # runs with the observability stack down unless it is asked for; README.md has the two commands.
+    # It carries no health check, because its image is distroless: there is nothing in it to check
+    # with.
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    profiles: ["observability"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      # The OTLP/HTTP endpoint only: gRPC 4317 stays on the compose network until something asks.
+      - "127.0.0.1:${CLAIM_TRIAGE_OTEL_HOST_PORT:-4318}:4318"
+
   smoke:
     # The same image and the same file as the developer's loop: one claim through the running stack.
     image: localhost/claim-triage-agent:dev
@@ -117,9 +193,10 @@ services:
     profiles: ["smoke"]
     command: ["claim-triage-smoke"]
     environment:
+      CLAIM_TRIAGE_API_BASE_URL: http://api:8000
       CLAIM_TRIAGE_CORE_SIM_BASE_URL: http://core-sim:8080
     depends_on:
-      core-sim:
+      api:
         condition: service_healthy
 
 volumes:
