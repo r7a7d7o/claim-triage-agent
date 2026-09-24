@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claim-triage-agent"
+version = "0.1.0"
+description = "Motor-claim triage agent for Slovak motor insurance: document extraction, edition-aware retrieval, classification, routing and decision support."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pydantic-settings>=2.6",
+]
+
+[project.scripts]
+claim-triage-api = "claim_triage.services.api:main"
+claim-triage-triager = "claim_triage.services.triager:main"
+claim-triage-extraction = "claim_triage.services.extraction:main"
+claim-triage-retrieval = "claim_triage.services.retrieval:main"
+claim-triage-guardrail-policy = "claim_triage.services.guardrail_policy:main"
+claim-triage-reviewer-ui = "claim_triage.services.reviewer_ui:main"
+claim-triage-core-sim = "claim_triage.services.core_sim:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "poethepoet>=0.30",
+    "pytest>=8.3",
+    "ruff>=0.9",
+]
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claim_triage"]
+
+[tool.poe.tasks]
+lint = { shell = "ruff check . && ruff format --check ." }
+types = "mypy src tests"
+unit = "pytest"
+check = ["lint", "types", "unit"]
+format = { shell = "ruff check --fix . && ruff format ." }
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF", "PT"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "pydantic_settings.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
