@@ -49,8 +49,9 @@ fixtures.
 
 Four ways a run fails, each naming itself in its message: **degradation** (more than the two-point
 tolerance below the tag's baseline), **floor** (below a declared floor, whether or not it improved),
-**coverage** (a metric the baseline records that this run did not measure) and **comparability**
-(a baseline recorded under other settings). Three consequences are deliberate:
+**coverage** (a metric the baseline records that this run did not measure, or a set that holds fewer
+cases than the baseline records) and **comparability** (a baseline recorded under other settings, or
+for another version of a set). Three consequences are deliberate:
 
 - **Adoption is not failure.** A metric with no baseline value is `adopted`: the sets grow a field,
   the classifier grows an axis, and the next baseline records it. The alternative — failing a metric
@@ -58,8 +59,9 @@ tolerance below the tag's baseline), **floor** (below a declared floor, whether 
   nobody could act on.
 - **Coverage is what makes disappearance loud.** Without it, a capability that stopped answering would
   simply leave the table, and its regression would leave with it. This is also what makes the empty
-  placeholder sets honest: a tag's baseline records what it measured, and a set that loses cases fails
-  the gate rather than quietly shrinking the evidence.
+  placeholder sets honest: a tag's baseline records what it measured — each set's version and case
+  count among it — and a set that loses cases fails the gate rather than quietly shrinking the
+  evidence.
 - **The citation floor is a requirement, not a threshold.** `retrieval.citation_validity` above 0.98
   is data; that it *has* a floor is enforced by the rules model, so no rules file can drop the one
   metric the specification gives an absolute floor (user stories 50 and 91). A metric may improve
@@ -91,7 +93,10 @@ adopts every metric, which is what starting a tag means.
 
 Settings travel in the file (`top_k`) because a hit rate at five and a hit rate at ten are two
 questions, not two answers. A baseline recorded at another depth fails comparability rather than being
-compared.
+compared. Each set's version travels with the settings for the same reason, and is compared the same
+way: the same metrics over another version of a set are another question. A set that holds *more*
+cases than the baseline records is still compared — growing the material asks the same question of
+more of it — while one that holds fewer fails coverage, because that is evidence leaving.
 
 ## Considered Options
 

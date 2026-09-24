@@ -16,7 +16,8 @@ the document itself — the build does, and the harness scores the answers the b
 
 The reader refuses what it does not read, naming the file and the line: a header that names a
 capability the file is not, an unknown key, a field whose name is not a field name, a duplicate
-case. Quietly dropping a case it could not parse is the one outcome a set reader must not have.
+case. That refusal is what keeps a run scoring the cases the file actually holds, rather than the
+cases it could parse out of it.
 """
 
 from __future__ import annotations
@@ -24,9 +25,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from claim_triage.evaluation.material import (
     SET_FILES,
@@ -45,9 +46,25 @@ FIELD_NAME: Final = re.compile(r"^[a-z][a-z0-9_]*$")
 """How a field is named in a case. A field name becomes part of a metric's name, so it stays a name
 a metric can carry: lower case, digits and underscores, starting with a letter."""
 
+
+def field_names(fields: dict[str, Scalar]) -> dict[str, Scalar]:
+    """Field values by name, or the refusal naming a name a metric could not carry."""
+    for name in fields:
+        if not FIELD_NAME.match(name):
+            raise ValueError(f"{name!r} is not a field name")
+    return fields
+
+
 type Scalar = str | int | float | bool | None
 """One extracted value. The types a document's fields hold before the schema registry gives them
 semantic types (ticket 11); comparing two of them is `claim_triage.evaluation.metrics`' business."""
+
+Fields = Annotated[dict[str, Scalar], AfterValidator(field_names)]
+"""What a case states and what an answer holds: values by field name, each one valid.
+
+Both are held to the same rule because both are scored against the same metric names, and an answer
+keyed by a name no case states would be scored as a miss on a name that could not be read.
+"""
 
 
 class ClauseRef(BaseModel):
@@ -96,15 +113,7 @@ class ExtractionCase(Case):
 
     document: str
     """The document this case is about, by the identifier the corpus generator gave it."""
-    fields: dict[str, Scalar] = Field(min_length=1)
-
-    @field_validator("fields")
-    @classmethod
-    def _field_names(cls, fields: dict[str, Scalar]) -> dict[str, Scalar]:
-        for name in fields:
-            if not FIELD_NAME.match(name):
-                raise ValueError(f"{name!r} is not a field name")
-        return fields
+    fields: Fields = Field(min_length=1)
 
 
 class RetrievalCase(Case):

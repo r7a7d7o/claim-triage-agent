@@ -14,12 +14,13 @@ Four rules, and each names itself in the failure it produces:
 * **floor** — a measured metric below the floor the rules declare for it, whether or not the
   baseline agrees. Citation validity carries this one: a decision pack whose citations do not
   resolve is wrong however much it improved (user stories 50 and 91).
-* **coverage** — a metric the baseline records that this run did not measure. A capability that
-  stops answering, a set that loses its cases, or a build that stops citing all show up here,
-  because the alternative is a metric that disappears from the table and takes its regression
-  with it.
-* **comparability** — the baseline was recorded under other settings than this run, so the two
-  numbers are not the same question. Nothing is compared, and the run fails rather than decide.
+* **coverage** — a metric the baseline records that this run did not measure, or a set that holds
+  fewer cases than the baseline records. A capability that stops answering, a set that loses its
+  cases, or a build that stops citing all show up here, because the alternative is evidence that
+  quietly shrinks and takes its regression with it.
+* **comparability** — the baseline was recorded under other settings than this run, or for another
+  version of a set, so the two numbers are not the same question. Nothing is compared, and the run
+  fails rather than decide.
 
 A metric with no baseline value is *adopted*, not failed: the sets grow a field, the classifier
 grows an axis, and the next baseline records it. What that leaves uncovered is stated rather than
@@ -38,7 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from claim_triage.evaluation.baselines import metrics_of
 from claim_triage.evaluation.material import Capability, document
-from claim_triage.evaluation.scoring import Measurement, Reading, is_metric
+from claim_triage.evaluation.scoring import Measurement, Reading, refuse_unmeasurable
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,13 +59,8 @@ class Rule(StrEnum):
     COMPARABILITY = "comparability"
 
 
-DECLARED_RULES: Final[tuple[Rule, ...]] = (
-    Rule.DEGRADATION,
-    Rule.FLOOR,
-    Rule.COVERAGE,
-    Rule.COMPARABILITY,
-)
-"""The rules, as the run's own summary counts them."""
+DECLARED_RULES: Final[tuple[Rule, ...]] = tuple(Rule)
+"""The rules, as the run's own summary counts them: every rule there is, and nothing else."""
 
 
 class Verdict(StrEnum):
@@ -76,7 +72,7 @@ class Verdict(StrEnum):
     BELOW_FLOOR = "below floor"
     NOT_MEASURED = "not measured"
     NO_CASES = "no cases"
-    NOT_ANSWERED = "not implemented"
+    NOT_IMPLEMENTED = "not implemented"
     INCOMPARABLE = "incomparable"
 
 
@@ -93,10 +89,7 @@ class Rules(BaseModel):
     @classmethod
     def _floors_are_measurable(cls, floors: dict[str, float]) -> dict[str, float]:
         for name, value in floors.items():
-            if not is_metric(name):
-                raise ValueError(f"{name!r} is not a metric this harness measures")
-            if not 0.0 <= value <= 1.0:
-                raise ValueError(f"{name} is {value}, which is not a proportion")
+            refuse_unmeasurable(name, value)
         if CITATION_VALIDITY not in floors:
             raise ValueError(
                 f"the rules declare no floor for {CITATION_VALIDITY}, which is the one metric"
@@ -154,20 +147,24 @@ def judge(
     settings: Settings,
 ) -> Outcome:
     """Judge a run's measurements against a tag's baseline, under the declared rules."""
-    if baseline.metrics and baseline.settings != settings:
+    other_question = _other_question(baseline, measurements, settings)
+    if other_question is not None:
         return Outcome(
             rules=rules,
             rows=tuple(_incomparable(measurement) for measurement in measurements),
-            failures=(
-                f"{Rule.COMPARABILITY}: the baseline was recorded at "
-                f"{_settings(baseline.settings)} and this run is {_settings(settings)}",
-            ),
+            failures=(other_question,),
         )
 
     rows: list[Row] = []
     failures: list[str] = []
     for measurement in measurements:
         recorded = metrics_of(baseline, measurement.capability)
+        at_the_tag = baseline.sets[measurement.capability]
+        if measurement.cases < at_the_tag.cases:
+            failures.append(
+                f"{Rule.COVERAGE}: {measurement.capability.value} holds"
+                f" {_cases(measurement.cases)} where the baseline records {at_the_tag.cases}"
+            )
         names = [
             *measurement.metrics,
             *(name for name in sorted(recorded) if name not in measurement.metrics),
@@ -185,7 +182,7 @@ def judge(
                     verdict=(
                         Verdict.NO_CASES
                         if measurement.reading is Reading.NO_CASES
-                        else Verdict.NOT_ANSWERED
+                        else Verdict.NOT_IMPLEMENTED
                     ),
                 )
             )
@@ -208,6 +205,45 @@ def judge(
             )
             failures.extend(_failures(name, value, at_baseline, floor, rules.tolerance))
     return Outcome(rules=rules, rows=tuple(rows), failures=tuple(failures))
+
+
+def _other_question(
+    baseline: Baseline, measurements: Sequence[Measurement], settings: Settings
+) -> str | None:
+    """The question the baseline was asked that this run is not, or `None` when they are one.
+
+    A metric is a number about a question, and two of them are only comparable when the question is
+    the same: the depth a ranked list was read at, and the version of the set that asked it. A
+    baseline recorded for another of either is refused rather than compared, because a delta a
+    reader takes for a regression and which is really a change in what was scored is worse than no
+    delta at all. A baseline that records no metric yet is nothing to be incomparable with: every
+    metric is adopted from it, and the first run of a tag is judged on the floor alone.
+    """
+    if not baseline.metrics:
+        return None
+    if baseline.settings != settings:
+        return (
+            f"{Rule.COMPARABILITY}: the baseline was recorded at {_settings(baseline.settings)}"
+            f" and this run is {_settings(settings)}"
+        )
+    other: list[tuple[str, int, int]] = []
+    for measurement in measurements:
+        recorded_version = baseline.sets[measurement.capability].version
+        if measurement.version != recorded_version:
+            other.append((measurement.capability.value, recorded_version, measurement.version))
+    if other:
+        return (
+            f"{Rule.COMPARABILITY}: the baseline records "
+            + ", ".join(f"{capability} v{recorded}" for capability, recorded, _ in other)
+            + ", and this run scores "
+            + ", ".join(f"{capability} v{scored}" for capability, _, scored in other)
+        )
+    return None
+
+
+def _cases(count: int) -> str:
+    """A case count as the failure line writes it."""
+    return f"{count} case" if count == 1 else f"{count} cases"
 
 
 def _verdict(

@@ -96,8 +96,8 @@ threshold is a number a release may change and a rule is not:
 |---|---|
 |degradation|a measured metric is more than `tolerance` below the value the baseline records for it, comparing drops rounded to nine decimals so that "two percentage points" does not depend on binary floating point|
 |floor|a measured metric is below the floor declared for it, whether or not it improved against the baseline — a tag's first run has no baseline at all, and the floor still fires|
-|coverage|the baseline records a metric this run did not measure — a capability that stopped answering, a set that lost its cases, a build that stopped citing|
-|comparability|the baseline was recorded under other settings than this run, so nothing is compared|
+|coverage|the baseline records a metric this run did not measure, or a set that holds fewer cases than the baseline records for it — a capability that stopped answering, a set that lost its cases, a build that stopped citing|
+|comparability|the baseline was recorded under other settings than this run, or for another version of a set, so nothing is compared|
 
 A metric with no baseline value is **adopted**, not failed: the sets grow a field, the classifier grows
 an axis, and the next baseline records it. A baseline naming a metric this harness no longer measures
@@ -120,10 +120,12 @@ uv run poe eval --tag v0.2.0 --record
 ```
 
 A baseline records each set's version and case count, the settings the run was measured under, and
-every metric it measured — rounded to six decimals, which is finer than any rule compares. A run that
-records a tag nothing was recorded for adopts every metric, because there is nothing to have
-regressed from; a run that only judges refuses that same tag, because a missing artefact is not a
-build that regressed to nothing.
+every metric it measured — rounded to six decimals, which is finer than any rule compares. The gate
+reads all three before it compares a metric: a set at another version is another question and nothing
+is compared, and a set holding fewer cases than the baseline records is a coverage failure, so the
+evidence a tag was measured on cannot quietly shrink. A run that records a tag nothing was recorded
+for adopts every metric, because there is nothing to have regressed from; a run that only judges
+refuses that same tag, because a missing artefact is not a build that regressed to nothing.
 
 A run that broke a declared rule against the baseline it is judged by is **not** recorded: a baseline
 is a release record, and moving the bar down would take the evidence with it. Starting a tag's record
@@ -138,10 +140,10 @@ extraction and retrieval and four for classification:
 * `fixtures/golden/` — the cases, with the fields, questions and bands a correct run produces.
 * `fixtures/predictions/` — the answers of a build at the quality `fixtures/baseline.json` records.
 * `fixtures/regressed/` — the same build, answered worse: a date written the way a document writes it,
-  an amount read wrong, an invented registration plate, a clause retrieved under the wrong edition, a
-  citation that resolves to nothing, two bands swapped, a queue wrong, and a fraudulent claim scored
-  below two clean ones. It exists to trip the gate, and to trip it on the rules rather than by
-  accident: it fails degradation on many metrics and the citation floor independently.
+  an amount read wrong, a missing policy number, an invented registration plate, a clause the retrieval
+  misses entirely, a citation that resolves to nothing, two bands answered wrong, a queue wrong, and a
+  fraudulent claim scored below two clean ones. It exists to trip the gate, and to trip it on the rules
+  rather than by accident: it fails degradation on many metrics and the citation floor independently.
 * `fixtures/baseline.json` — recorded from `predictions/`, so the three fixture runs mean something.
 
 ```bash

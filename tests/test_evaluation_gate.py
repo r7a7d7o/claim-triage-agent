@@ -21,6 +21,7 @@ material, so a boundary is asserted at the boundary: a drop of exactly the toler
 from __future__ import annotations
 
 import json
+import shutil
 from typing import TYPE_CHECKING, Final
 
 import pytest
@@ -101,12 +102,58 @@ def a_measurement(
     *,
     capability: Capability = Capability.RETRIEVAL,
     reading: Reading = Reading.SCORED,
+    version: int = 1,
+    cases: int = 3,
     answered: int = 3,
 ) -> Measurement:
     """What one capability measured in a run, for a rule to be judged on."""
     return Measurement(
-        capability=capability, reading=reading, cases=3, answered=answered, metrics=dict(metrics)
+        capability=capability,
+        version=version,
+        reading=reading,
+        cases=cases,
+        answered=answered,
+        metrics=dict(metrics),
     )
+
+
+def rewritten_fixtures(
+    tmp_path: Path,
+    capability: Capability,
+    *,
+    version: int | None = None,
+    cases: int | None = None,
+) -> tuple[Path, Path]:
+    """The fixture material, with one capability's set re-versioned or cut down to fewer cases.
+
+    The answers move with it: a case the set no longer holds may not be answered, so the recorded
+    answers are cut to the cases that are left.
+    """
+    golden = tmp_path / "golden"
+    answers = tmp_path / "predictions"
+    shutil.copytree(FIXTURE_GOLDEN, golden)
+    shutil.copytree(FIXTURE_ANSWERS, answers)
+
+    set_file = golden / f"{capability.value}.jsonl"
+    header, *held = set_file.read_text(encoding="utf-8").splitlines()
+    if version is not None:
+        named = json.loads(header)
+        named["version"] = version
+        header = json.dumps(named)
+    if cases is not None:
+        held = held[:cases]
+        kept = {json.loads(line)["case_id"] for line in held}
+        answered = answers / f"{capability.value}.jsonl"
+        answered.write_text(
+            "".join(
+                f"{line}\n"
+                for line in answered.read_text(encoding="utf-8").splitlines()
+                if json.loads(line)["case_id"] in kept
+            ),
+            encoding="utf-8",
+        )
+    set_file.write_text("".join(f"{line}\n" for line in [header, *held]), encoding="utf-8")
+    return golden, answers
 
 
 def the_rules(**overrides: object) -> Rules:
@@ -283,6 +330,77 @@ def test_a_capability_the_baseline_scores_and_the_run_does_not_measure_fails_cov
     assert "and this run did not measure it" in printed
     assert "not measured" in printed
     assert "gate: failed - 1 of 4 declared rules fired (coverage)" in printed
+
+
+def test_a_set_that_lost_cases_fails_coverage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A set that shrank is less evidence rather than the same evidence, and the gate says so.
+
+    The baseline records how many cases each set held at the tag, so a capability answered over a
+    third of its material cannot pass on the numbers of the set it used to be.
+    """
+    golden, answers = rewritten_fixtures(tmp_path, Capability.EXTRACTION, cases=1)
+
+    assert (
+        main(
+            [
+                "--sets",
+                str(golden),
+                "--predictions",
+                str(answers),
+                "--baseline",
+                str(FIXTURE_BASELINE),
+            ]
+        )
+        == FAILED
+    )
+
+    printed = capsys.readouterr().out
+    assert "coverage: extraction holds 1 case where the baseline records 3" in printed
+    assert "extraction.f1" in printed
+    assert "gate: failed - 1 of 4 declared rules fired (coverage)" in printed
+
+
+def test_a_set_that_grew_is_compared_rather_than_refused() -> None:
+    """Only losing cases is a failure: a set that grew asks the same question of more material."""
+    outcome = judge(
+        [a_measurement({"retrieval.mrr": 1.0}, cases=4)],
+        a_baseline({"retrieval.mrr": 1.0}),
+        the_rules(),
+        settings=Settings(top_k=5),
+    )
+
+    assert outcome.passed
+    assert outcome.rows[0].verdict is Verdict.OK
+
+
+def test_a_metric_over_another_version_of_a_set_is_not_compared(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same metrics over another version of a set are another question: nothing is compared."""
+    golden, answers = rewritten_fixtures(tmp_path, Capability.CLASSIFICATION, version=2)
+
+    assert (
+        main(
+            [
+                "--sets",
+                str(golden),
+                "--predictions",
+                str(answers),
+                "--baseline",
+                str(FIXTURE_BASELINE),
+            ]
+        )
+        == FAILED
+    )
+
+    printed = capsys.readouterr().out
+    assert (
+        "comparability: the baseline records classification v1, and this run scores"
+        " classification v2" in printed
+    )
+    assert "incomparable" in printed
 
 
 def test_a_baseline_recorded_under_other_settings_is_not_compared(

@@ -29,7 +29,7 @@ from claim_triage.evaluation.baselines import (
     unrecorded,
     write_baseline,
 )
-from claim_triage.evaluation.build import answers_from_build
+from claim_triage.evaluation.build import STAGES, answers_from_build
 from claim_triage.evaluation.gate import DECLARED_RULES, Outcome, Row, judge, read_rules
 from claim_triage.evaluation.material import Unreadable
 from claim_triage.evaluation.scoring import HIT_RATE_K, measure
@@ -247,11 +247,7 @@ def _report(
     """The report: what was scored, against what, under which rules, and what they said."""
     lines = [
         f"sets: {_sets(sets)}",
-        (
-            f"answers: recorded at {arguments.predictions}"
-            if arguments.predictions is not None
-            else "answers: the current build, which answers no capability yet"
-        ),
+        _answers(arguments),
         f"baseline: {baseline.tag} at {baseline_path}, {len(baseline.metrics)} metrics recorded"
         f" at top_k={baseline.settings.top_k}",
         f"rules: {outcome.rules.describe()}",
@@ -268,6 +264,21 @@ def _sets(sets: Sets) -> str:
     return ", ".join(
         f"{one.capability.value} v{one.version} ({len(one.cases)} cases)" for one in sets.all
     )
+
+
+def _answers(arguments: Arguments) -> str:
+    """Where a run's answers came from, as this build stands.
+
+    Read from `build.STAGES` rather than stated here: the seam fills in the increment that lands a
+    capability, and a line that said "which answers no capability yet" would go on saying it after
+    the first one did.
+    """
+    if arguments.predictions is not None:
+        return f"answers: recorded at {arguments.predictions}"
+    answering = ", ".join(capability.value for capability in STAGES)
+    if not answering:
+        return "answers: the current build, which answers no capability yet"
+    return f"answers: the current build, answering {answering}"
 
 
 def _table(rows: Sequence[Row]) -> list[str]:

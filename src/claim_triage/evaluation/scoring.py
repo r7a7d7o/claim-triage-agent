@@ -86,13 +86,33 @@ class Reading(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Measurement:
-    """One capability as a run read it: how many cases, how many answered, and what it measured."""
+    """One capability as a run read it: the set's version and size, and what it measured.
+
+    The case count and the set's version travel with every measurement because they are part of what
+    a metric is a metric *of*: the same number over three cases and over three thousand is not the
+    same evidence (`claim_triage.evaluation.gate` judges both), and so is the same number over
+    another version of the set.
+    """
 
     capability: Capability
+    version: int
     reading: Reading
     cases: int
     answered: int
     metrics: Mapping[str, float]
+
+
+def refuse_unmeasurable(name: str, value: float) -> None:
+    """Refuse a metric name nothing measures, or a value that is not a proportion of something.
+
+    A baseline and a floor are both keyed by metric name and both hold a proportion, so both are
+    held to this one rule: a name no metric carries is a claim that can never be compared, and a
+    value outside zero to one is a typo to do arithmetic with rather than a threshold.
+    """
+    if not is_metric(name):
+        raise ValueError(f"{name!r} is not a metric this harness measures")
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} is {value}, which is not a proportion")
 
 
 def field_metric(field: str) -> str:
@@ -124,7 +144,7 @@ def measure_extraction(
     worse than the rest is visible rather than averaged into it.
     """
     if not golden.cases:
-        return _no_cases(Capability.EXTRACTION)
+        return _no_cases(Capability.EXTRACTION, golden)
     if answers is None:
         return _unanswered(Capability.EXTRACTION, golden)
 
@@ -162,7 +182,7 @@ def measure_retrieval(
     baseline holds the metric and this run does not measure it.
     """
     if not golden.cases:
-        return _no_cases(Capability.RETRIEVAL)
+        return _no_cases(Capability.RETRIEVAL, golden)
     if answers is None:
         return _unanswered(Capability.RETRIEVAL, golden)
 
@@ -202,7 +222,7 @@ def measure_classification(
     minority and a ROC curve's false-positive rate is diluted by the negatives.
     """
     if not golden.cases:
-        return _no_cases(Capability.CLASSIFICATION)
+        return _no_cases(Capability.CLASSIFICATION, golden)
     if answers is None:
         return _unanswered(Capability.CLASSIFICATION, golden)
 
@@ -246,6 +266,7 @@ def _scored[CaseT: Case](
 ) -> Measurement:
     return Measurement(
         capability=capability,
+        version=golden.version,
         reading=Reading.SCORED,
         cases=len(golden.cases),
         answered=answered,
@@ -253,15 +274,21 @@ def _scored[CaseT: Case](
     )
 
 
-def _no_cases(capability: Capability) -> Measurement:
+def _no_cases[CaseT: Case](capability: Capability, golden: GoldenSet[CaseT]) -> Measurement:
     return Measurement(
-        capability=capability, reading=Reading.NO_CASES, cases=0, answered=0, metrics={}
+        capability=capability,
+        version=golden.version,
+        reading=Reading.NO_CASES,
+        cases=len(golden.cases),
+        answered=0,
+        metrics={},
     )
 
 
 def _unanswered[CaseT: Case](capability: Capability, golden: GoldenSet[CaseT]) -> Measurement:
     return Measurement(
         capability=capability,
+        version=golden.version,
         reading=Reading.NOT_ANSWERED,
         cases=len(golden.cases),
         answered=0,

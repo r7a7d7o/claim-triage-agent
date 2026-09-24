@@ -2,9 +2,10 @@
 
 A baseline is committed, one file per release tag, and holds the named metrics of every capability
 the sets scored at that tag — plus the sets' versions and the settings the run was measured under,
-which is what makes a comparison reproducible rather than approximate. Ticket 14 requires the sets
-to be versioned for exactly this reason, and the gate refuses a baseline recorded under other
-settings rather than comparing two runs that were not the same run.
+which the gate compares before it compares a metric, so a comparison is reproducible rather than
+approximate. Ticket 14 requires the sets to be versioned for exactly this reason, and the gate
+refuses a baseline recorded under other settings rather than comparing two runs that were not the
+same run.
 
 The tag is the version the distribution declares, prefixed with `v`, because the increments are
 released as annotated tags and the version is the same string. Nothing here reads a clock: a
@@ -21,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from claim_triage import DISTRIBUTION
 from claim_triage.evaluation.material import Capability, Unreadable, document
-from claim_triage.evaluation.scoring import Reading, is_metric
+from claim_triage.evaluation.scoring import Reading, refuse_unmeasurable
 from claim_triage.evaluation.sets import Sets
 
 if TYPE_CHECKING:
@@ -80,10 +81,7 @@ class Baseline(BaseModel):
     @classmethod
     def _known_metrics(cls, metrics: dict[str, float]) -> dict[str, float]:
         for name, value in metrics.items():
-            if not is_metric(name):
-                raise ValueError(f"{name!r} is not a metric this harness measures")
-            if not 0.0 <= value <= 1.0:
-                raise ValueError(f"{name} is {value}, which is not a proportion")
+            refuse_unmeasurable(name, value)
         return metrics
 
 

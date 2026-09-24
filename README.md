@@ -143,7 +143,7 @@ src/claim_triage/model/
 src/claim_triage/api/   the entry point's ASGI surface
 src/claim_triage/evaluation/
                         the evaluation harness: the set formats, the metrics, the gate, the per-tag
-                        baseline store, and the runner `uv run poe eval` is
+                        baseline store, and the runner behind `uv run poe eval`
 src/claim_triage/smoke.py
                         one claim end to end through a running stack — what the container job gates on
 tests/                  tests, written at the seams the specification confirms
@@ -373,10 +373,11 @@ uv run poe eval-fixtures   # the harness's own exercise set, against the baselin
 baseline it was compared to, the difference and the verdict — and leaves non-zero only through the
 rules `evaluation/gate.json` declares: a **degradation** of more than two points below the tag's
 baseline, a metric under its absolute **floor** (citation validity carries one, and no rules file may
-leave it out), a **coverage** failure when a metric the baseline records is not measured, and an
-**incomparable** baseline recorded under other settings. Exit `1` means one of those fired, exit `2`
-means the run could not be made at all, and nothing else is non-zero. A capability the build does not
-answer yet is reported as `not implemented` rather than scored zero.
+leave it out), a **coverage** failure when a metric the baseline records is not measured or a set has
+lost cases against the tag's record of it, and an **incomparable** baseline recorded under other
+settings or for another version of a set. Exit `1` means one of those fired, exit `2` means the run
+could not be made at all, and nothing else is non-zero. A capability the build does not answer yet is
+reported as `not implemented` rather than scored zero.
 
 The three sets are JSONL, one file per capability: a header naming the capability, the version and
 what the set is for, then one case per line. They are **placeholders** — the format, the version, no
@@ -390,10 +391,10 @@ same three formats with cases, the answers of a build at the quality its baselin
 same build regressed past both rules. The evaluation CI job scores the first, then installs the
 regressed answers over a copy and fails unless the gate refuses them with exit `1` — a gate that
 refused everything would fail the step before it. The build's answers arrive through one seam
-(`claim_triage.evaluation.build`), which each increment implementing a capability fills: retrieval in
-ticket 10, extraction in ticket 12, classification and routing in tickets 16 and 17; answers can also
-be read from a recorded directory (`--predictions`), which is how a run is re-scored without the build
-and how the CI job injects its regression.
+(`claim_triage.evaluation.build`), which the increment implementing a capability fills — the entries
+and the tickets they arrive with are listed there and in `docs/adr/0008`. Answers can also be read
+from a recorded directory (`--predictions`), which is how a run is re-scored without the build and how
+the CI job injects its regression.
 
 The formats, every metric's meaning, the declared rules and the fixture material are documented where
 the material is: [`evaluation/README.md`](evaluation/README.md). `docs/adr/0008` records the decision

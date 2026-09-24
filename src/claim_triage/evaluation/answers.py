@@ -11,9 +11,8 @@ A recorded answer is one JSON line per case: the case's identifier and the answe
 envelope is the same for every capability and the answer is validated against that capability's own
 shape, the way a fixture is validated against the schema the call asked for
 (`claim_triage.model.replay`). A case the set does not hold, a case answered twice, or a capability
-the set holds no case for is refused rather than ignored: answers and the set they are scored
-against have to be about the same cases, once each, or a metric would quietly be measured over the
-wrong population.
+the set holds no case for is refused, naming the line: answers and the set they are scored against
+have to be about the same cases, once each, or a metric would be measured over the wrong population.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from claim_triage.evaluation.material import (
     SET_FILES,
@@ -36,7 +35,7 @@ from claim_triage.evaluation.material import (
     refuse_repeats,
     validated,
 )
-from claim_triage.evaluation.sets import FIELD_NAME, ClauseRef, Scalar, Sets
+from claim_triage.evaluation.sets import ClauseRef, Fields, Sets
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,15 +46,7 @@ class ExtractionAnswer(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    fields: dict[str, Scalar] = Field(default_factory=dict)
-
-    @field_validator("fields")
-    @classmethod
-    def _field_names(cls, fields: dict[str, Scalar]) -> dict[str, Scalar]:
-        for name in fields:
-            if not FIELD_NAME.match(name):
-                raise ValueError(f"{name!r} is not a field name")
-        return fields
+    fields: Fields = Field(default_factory=dict)
 
 
 class RetrievalAnswer(BaseModel):
