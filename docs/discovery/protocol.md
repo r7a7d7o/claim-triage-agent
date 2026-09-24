@@ -6,7 +6,7 @@
 > a real interview.
 
 How a working session is run, what each step of one produces, and what happens to the critique at the
-end. The material a session is run with sits beside this file: [PERSONAS.md](PERSONAS.md) (the three
+end. The material a session is run with sits beside this file: [personas.md](personas.md) (the three
 roles), [interview-guide.md](interview-guide.md) (the arc of the conversation),
 [process-walkthrough.md](process-walkthrough.md) (today's work, written down),
 [question-bank.md](question-bank.md) (the exceptions and the workarounds), and
@@ -34,7 +34,8 @@ Six steps, in order. Each ends on the artefact it produces.
 1. **Frame it.** Name the persona, the date, the increment and **the version being critiqued** — a
    tag, a commit, or "the specification, nothing built". Name what is in scope and what is out of
    scope for this session, so a persona is never asked about a decision it does not own.
-   *Ends when:* the record's header carries all four fields — persona, date, increment, version.
+   *Ends when:* the record's header carries all four fields — persona, date, increment, version — and
+   the two scope lines.
 
 2. **Walk today's work.** The persona says how the work is actually done now: the journey of one
    claim, who touches it, where it waits, which systems it is re-typed between. The interviewer fills
@@ -42,11 +43,9 @@ Six steps, in order. Each ends on the artefact it produces.
    *Ends when:* every field of the walkthrough has an entry, including the waits, the handoffs and
    every place the same value is written down twice.
 
-3. **Press on the exceptions and the workarounds.** Work [question-bank.md](question-bank.md):
-   the exceptions the happy path hides (a missing police record, a mismatched plate, a field nobody
-   can read, the same claim submitted twice) and the workarounds nobody writes down (the private
-   list, the value kept somewhere the system does not know about, the step skipped when the queue is
-   long).
+3. **Press on the exceptions and the workarounds.** Work the exception and workaround sections of
+   [question-bank.md](question-bank.md): the exceptions the happy path hides, and the workarounds
+   nobody writes down.
    *Ends when:* every exception question has an answer or an explicit "that does not happen here",
    and every workaround named is in the walkthrough.
 

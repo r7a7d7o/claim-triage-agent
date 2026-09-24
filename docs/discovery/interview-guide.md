@@ -6,7 +6,7 @@
 The arc of a session, in the order the conversation is taken. This is the floor of it, not the
 ceiling: when a persona names something these questions do not reach, follow it and note the detour in
 the record. [question-bank.md](question-bank.md) is the lookup the later sections dip into;
-[process-walkthrough.md](process-walkthrough.md) is what sections 2, 3 and 6 are filled into.
+[process-walkthrough.md](process-walkthrough.md) is what sections 1, 2, 3, 5 and 6 are filled into.
 
 ## How to ask
 
@@ -87,14 +87,13 @@ the record. [question-bank.md](question-bank.md) is the lookup the later section
 ## 6. The exceptions and the workarounds
 
 *What it is for: the part of the work nobody writes down. It produces the walkthrough's exception and
-workaround sections, filled from [question-bank.md](question-bank.md).*
+workaround sections.*
 
-- Work the bank's exception section, and answer for this role; "that is not mine" is a valid answer
-  and is recorded as one.
-- Then the workaround section: where do *you* keep the list that the system does not have, and what is
-  on it?
-- What do you skip when the queue is long, and what makes you come back to it?
-- What did you learn to do from the person who trained you, that no document says?
+- Work [question-bank.md](question-bank.md)'s exception section straight down, for this role. "That
+  is not mine" is a valid answer and is recorded as one.
+- Then its workaround section, the same way.
+- Every answer that arrives as a story rather than a rule is followed with "where is that written
+  down?"
 
 ## 7. The close
 

@@ -64,11 +64,8 @@ what *should* happen is not asked here and is left for the critique.
 
 ## Workarounds on this walk
 
-- Where the actor keeps what the system does not: the private list, the spreadsheet, the notebook, the
-  saved e-mail, the colleague's memory.
-- What the actor re-types because the two systems do not talk.
-- What the actor skips when the queue is long, and what brings them back to it.
-- What the actor was taught by the person who trained them, that no document says.
+One entry per workaround the bank's workaround questions elicited, in the actor's words: what it is,
+where it lives, who else knows it, and what breaks when whoever holds it is away.
 
 ## The check before moving on
 

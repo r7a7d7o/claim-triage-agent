@@ -46,7 +46,7 @@ critique read apart from the walkthrough it came out of cannot be judged.
 |The process as the persona works it|the filled [process-walkthrough.md](process-walkthrough.md) for this session|the critique has no ground under it|
 |Transcript|the conversation, in order: the interviewer's turns plainly, the persona's marked `SIMULATED`|the critique cannot be checked against what produced it|
 |Critique|each item, with the reason the persona gave for it and the part of the thing it is about|the session produced nothing, and that is recorded here|
-|Specification delta|each critique item as a change to a named document — the specification, a schema, a ticket, [PROTOCOL.md](PROTOCOL.md)|critique items have been dropped rather than decided|
+|Specification delta|each critique item as a change to a named document — the specification, a schema, a ticket, [protocol.md](protocol.md)|critique items have been dropped rather than decided|
 |Tickets|for each delta, the ticket in the next increment that carries it, or a **wontfix** with its reason|the delta will not be built and nothing says so|
 |Open items|what the persona could not decide and what a real stakeholder has to settle|the session's unknowns are lost|
 
@@ -68,7 +68,5 @@ things a session is for finding.
 
 ## A finished record
 
-`docs/discovery/sessions/` is empty until the first session runs (v0.3, ticket 23). The session it
-holds then is a critique of the triage increment, run under [PROTOCOL.md](PROTOCOL.md), and the
-protocol's own rules — the four header fields, the stamped turns, a delta and a destination per
-critique item — are what it is checked against.
+The directory holds no record until a session runs; when one does, it is written into the template
+above and checked against the recording rules in [protocol.md](protocol.md).

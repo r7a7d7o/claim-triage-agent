@@ -7,7 +7,7 @@
 The three roles the system works for, each written the same way: what it is responsible for, the
 incentive it works to — stated as what it is measured on — which decisions are its own, what it reads,
 and where its knowledge stops. The boundary at the end of each is as load-bearing as the rest — a
-persona that answers past it answers as the interviewer, and [PROTOCOL.md](PROTOCOL.md) treats that as
+persona that answers past it answers as the interviewer, and [protocol.md](protocol.md) treats that as
 a defect of the session.
 
 The vocabulary is the roles' own, in Slovak where the work is Slovak: a claim is a *škodový prípad*,

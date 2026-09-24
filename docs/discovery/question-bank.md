@@ -8,7 +8,7 @@ nobody writes down. It is consulted, not read straight through, and it is a **fl
 closed list — a session that only answers these has found only what was already anticipated.
 
 Ask each question of the role that owns it. A question outside a persona's role is answered "that is
-not mine" and recorded that way; [PERSONAS.md](PERSONAS.md) has the boundary for each role and which
+not mine" and recorded that way; [personas.md](personas.md) has the boundary for each role and which
 of the four opening exceptions each meets at which moment.
 
 ## The happy path, briefly

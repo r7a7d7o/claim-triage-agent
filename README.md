@@ -404,18 +404,12 @@ and what the placeholder sets cost.
 ## Discovery and the stakeholder loop
 
 The system is specified from structured working sessions with the three roles it works for, run under
-a written protocol: [`docs/discovery/`](docs/discovery/PROTOCOL.md) holds the session protocol, the
-three personas, the interview guide, the process-walkthrough template, the question bank and the
-session record. A session puts one version of the thing — a specification, a prototype or a run — in
-front of one persona and asks what it gets wrong, and it leaves behind a transcript, a critique note
-and the specification delta that note produced. Every artefact is stamped `SIMULATED`: the personas
-are role-plays written from the roles named in the posting this repository answers, not real
-stakeholders.
-
-The loop is one increment long. A session critiques what the previous increment shipped, its critique
-becomes a specification delta and tickets, and those tickets are the next increment's. The protocol is
-committed now, with nothing built to demo, so that the increment it critiques can still be changed
-cheaply; v0.3 (ticket 23) runs the first session.
+a protocol committed in [`docs/discovery/`](docs/discovery/protocol.md): the protocol, the three
+personas, the interview guide, the process-walkthrough template, the question bank and the session
+record. A session critiques the increment it runs in — the version under discussion, not the released
+one — and leaves behind a transcript, a critique note and the specification delta that note produced,
+whose tickets are the next increment's. Every artefact is stamped `SIMULATED`: the personas are
+role-plays written from the roles named in the posting this repository answers, not real stakeholders.
 
 ## Configuration
 
