@@ -178,6 +178,21 @@ def test_the_committed_sets_print_a_table_and_pass(capsys: pytest.CaptureFixture
     assert f"gate: passed - {len(DECLARED_RULES)} declared rules, none fired" in printed
 
 
+def test_the_answers_line_follows_the_seam(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The report names what the build answers, read from the seam rather than stated in the report.
+
+    The line said "which answers no capability yet" until this was asked of `build.STAGES`; an
+    increment that registers a stage is what makes it say otherwise, so a stage is registered here.
+    """
+    monkeypatch.setattr(runner, "STAGES", {Capability.RETRIEVAL: lambda cases: {}})
+
+    assert main(["--sets", str(COMMITTED_SETS)]) == PASSED
+
+    assert "answers: the current build, answering retrieval" in capsys.readouterr().out
+
+
 def test_the_baseline_a_run_reads_is_the_one_its_release_tag_names(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
