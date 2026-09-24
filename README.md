@@ -150,6 +150,7 @@ tests/                  tests, written at the seams the specification confirms
 tests/contract/         the generated client against a running service, and it against the document
 tests/test_audit_transaction.py
                         the audit transaction, against a real Postgres (poe postgres)
+docs/discovery/         the working-session protocol, the three personas and the session material
 docs/adr/               architecture decision records
 .github/workflows/      the CI pipeline
 ```
@@ -399,6 +400,16 @@ the CI job injects its regression.
 The formats, every metric's meaning, the declared rules and the fixture material are documented where
 the material is: [`evaluation/README.md`](evaluation/README.md). `docs/adr/0008` records the decision
 and what the placeholder sets cost.
+
+## Discovery and the stakeholder loop
+
+The system is specified from structured working sessions with the three roles it works for, run under
+a protocol committed in [`docs/discovery/`](docs/discovery/protocol.md): the protocol, the three
+personas, the interview guide, the process-walkthrough template, the question bank and the session
+record. A session critiques the increment it runs in — the version under discussion, not the released
+one — and leaves behind a transcript, a critique note and the specification delta that note produced,
+whose tickets are the next increment's. Every artefact is stamped `SIMULATED`: the personas are
+role-plays written from the roles named in the posting this repository answers, not real stakeholders.
 
 ## Configuration
 
