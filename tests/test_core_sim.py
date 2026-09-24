@@ -2,9 +2,10 @@
 
 This is the seam the specification names for the API boundary: request and response contracts,
 schema validation, error mapping and the idempotency of writes, exercised through the app rather
-than through its internals. The store is a double because the unit job has no database; the
-`contract` job runs the same surface, and the same generated client, against the Postgres store the
-service owns.
+than through its internals. The store is a double because the unit job has no database — except in
+the one test below where the store's own answer to a database it cannot reach is the behaviour under
+test; the `contract` job runs the same surface, and the same generated client, against the Postgres
+store the service owns.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from claim_triage.core_sim.app import create_app
+from claim_triage.core_sim.store import PostgresCoreSimStore
 from support import InMemoryCoreSim
 
 if TYPE_CHECKING:
@@ -184,6 +186,22 @@ def test_readiness_follows_the_records_the_systems_hold() -> None:
     assert reachable.json() == {"status": "ok"}
     assert unreachable.status_code == 503
     assert unreachable.json()["code"] == "service_unavailable"
+
+
+def test_the_systems_report_unavailable_when_the_database_is_unreachable() -> None:
+    """What an operator sees when Postgres is down: the systems answer, their claims do not.
+
+    The real store, pointed at a port nothing listens on — port 1 is never a Postgres, so the
+    refusal is immediate and the test needs no database of its own.
+    """
+    unreachable = PostgresCoreSimStore(
+        "postgresql://claim_triage:claim_triage@127.0.0.1:1/claim_triage"
+    )
+
+    readiness = TestClient(create_app(unreachable)).get("/healthz")
+
+    assert readiness.status_code == 503
+    assert readiness.json()["code"] == "service_unavailable"
 
 
 @pytest.mark.parametrize(

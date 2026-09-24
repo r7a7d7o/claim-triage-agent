@@ -173,8 +173,14 @@ def test_a_refused_write_fails_the_run(
         ((201, "not json at all"), "answered non-JSON"),
         ((201, {**CLAIM, "status": "paid"}), "the contract does not cover"),
         ((202, CLAIM), "outside the contract"),
+        ((201, TRIAGED), "expected claim"),
     ],
-    ids=["body-not-json", "status-outside-the-contract", "unexpected-status"],
+    ids=[
+        "body-not-json",
+        "status-outside-the-contract",
+        "unexpected-status",
+        "claim-in-the-wrong-state",
+    ],
 )
 def test_an_answer_the_contract_does_not_allow_fails_the_run(
     serve: Callable[[FastAPI], str],

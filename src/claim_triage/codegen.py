@@ -183,13 +183,9 @@ def _refusal(response: httpx2.Response) -> NoReturn:
             f"{response.request.url} answered {response.status_code} outside the contract",
             status_code=response.status_code,
         ) from undocumented
-    refusal = _CODES.get(error.code)
-    if refusal is None:
-        raise UnexpectedResponse(
-            f"{response.request.url} refused with the undocumented code {error.code!r}",
-            status_code=response.status_code,
-        )
-    raise refusal(response.status_code, error)
+    # The table and the enum are generated from the same codes, so every answer has an exception
+    # waiting for it: there is no "code the contract does not name" to fall back on.
+    raise _CODES[error.code](response.status_code, error)
 '''
 
 CLIENT_CLASS: Final = '''
