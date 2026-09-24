@@ -30,7 +30,11 @@ def main() -> int:
     )
     runs = RunClient(infrastructure.triager_base_url)
     try:
-        uvicorn.run(create_app(runs, telemetry=traces), host=resolution.host, port=resolution.port)
+        uvicorn.run(
+            create_app(runs, telemetry=traces, guard=resolution.guard),
+            host=resolution.host,
+            port=resolution.port,
+        )
     finally:
         runs.close()
         traces.shutdown()

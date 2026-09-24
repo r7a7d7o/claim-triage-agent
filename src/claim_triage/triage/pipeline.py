@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
 from claim_triage import telemetry
-from claim_triage.boundary import Refused, Unavailable
+from claim_triage.boundary import BoundaryError, Refused, Unavailable
 from claim_triage.contract.client import CoreSimClient, CoreSimUnreachable, Refusal
 from claim_triage.contract.models import Claim, ClaimStatus, ClaimStatusUpdate, ClaimSubmission
 from claim_triage.triage import graph as topology
@@ -82,6 +82,7 @@ class TriagePipeline:
                     experiment=request.experiment,
                     variant=request.variant,
                     status=status,
+                    guard_verdicts=request.guard_verdicts,
                     trace_id=telemetry.current_trace_id() or "",
                     started_at=started_at,
                     completed_at=datetime.now(UTC),
@@ -93,7 +94,9 @@ class TriagePipeline:
                     f"the surrounding systems are unreachable: {unreachable}"
                 ) from None
             except Refusal as refusal:
-                raise Refused(answered_with(refusal), refusal.response) from refusal
+                raise Refused(
+                    answered_with(refusal), BoundaryError.relayed(refusal.response)
+                ) from refusal
             except TriageStoreUnavailable as unavailable:
                 raise Unavailable(str(unavailable)) from None
 
@@ -145,6 +148,7 @@ class TriagePipeline:
             node=topology.NODE,
             actor=Actor.AGENT,
             status=run.status,
+            guard_verdicts=run.guard_verdicts,
             experiment=run.experiment,
             variant=run.variant,
             trace_id=run.trace_id,

@@ -22,6 +22,7 @@ import pytest
 
 from claim_triage.config import InfrastructureSettings
 from claim_triage.contract.models import ClaimStatus
+from claim_triage.guards.verdict import Check, DocumentVerdicts, Verdict
 from claim_triage.triage import audit
 from claim_triage.triage.audit import Actor, AuditEntryContent
 from claim_triage.triage.run import TriageRun
@@ -31,6 +32,15 @@ pytestmark = pytest.mark.postgres
 
 CLAIM: UUID = UUID("9d7c5b21-4e8f-4a36-b0d2-71f3c6e95a48")
 RECORDED_AT = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+
+VERDICTS: list[DocumentVerdicts] = [
+    DocumentVerdicts(
+        filename="oznamenie-skody.pdf",
+        media_type="application/pdf",
+        verdicts=[Verdict(check=Check.SIZE, passed=True, detail="1841 bytes, within the ceiling")],
+    )
+]
+"""What the run was admitted with, so these tests carry verdicts through the columns as well."""
 
 
 class ForcedFailure(Exception):
@@ -62,6 +72,7 @@ def a_run() -> TriageRun:
         experiment="baseline",
         variant="replay",
         status=ClaimStatus.TRIAGED,
+        guard_verdicts=VERDICTS,
         trace_id="ab" * 16,
         started_at=RECORDED_AT,
         completed_at=RECORDED_AT,
@@ -75,6 +86,7 @@ def content(run: TriageRun, node: str = "noop") -> AuditEntryContent:
         node=node,
         actor=Actor.AGENT,
         status=run.status,
+        guard_verdicts=run.guard_verdicts,
         experiment=run.experiment,
         variant=run.variant,
         trace_id=run.trace_id,

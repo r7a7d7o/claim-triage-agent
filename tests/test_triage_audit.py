@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from claim_triage.contract.models import ClaimStatus
+from claim_triage.guards.verdict import Check, DocumentVerdicts, Verdict
 from claim_triage.triage.audit import (
     GENESIS,
     Actor,
@@ -25,6 +26,16 @@ CLAIM: UUID = UUID("9d7c5b21-4e8f-4a36-b0d2-71f3c6e95a48")
 RUN: UUID = UUID("3f2a1c48-6b3d-4e7a-9f21-0c5d8e4b7a96")
 RECORDED_AT = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
 
+VERDICTS: list[DocumentVerdicts] = [
+    DocumentVerdicts(
+        filename="oznamenie-skody.pdf",
+        media_type="application/pdf",
+        verdicts=[
+            Verdict(check=Check.PAGE_COUNT, passed=True, detail="2 pages, within the ceiling")
+        ],
+    )
+]
+
 
 def content(node: str = "noop") -> AuditEntryContent:
     """One entry's content: the same claim and run every time, so only the test's change differs."""
@@ -34,6 +45,7 @@ def content(node: str = "noop") -> AuditEntryContent:
         node=node,
         actor=Actor.AGENT,
         status=ClaimStatus.TRIAGED,
+        guard_verdicts=VERDICTS,
         experiment="baseline",
         variant="replay",
         trace_id="ab" * 16,
@@ -158,6 +170,7 @@ def test_the_digest_covers_every_field_an_entry_holds() -> None:
         ("node", "emit"),
         ("actor", Actor.SYSTEM),
         ("status", ClaimStatus.RECEIVED),
+        ("guard_verdicts", [*VERDICTS, *VERDICTS]),
         ("experiment", "extraction-ocr"),
         ("variant", "provider"),
         ("trace_id", "cd" * 16),

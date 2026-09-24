@@ -1,4 +1,4 @@
-"""Test doubles, at the boundaries the specification names, and the ways a test serves an app.
+"""Test doubles, at the boundaries the specification names, and what a test serves an app with.
 
 The surrounding systems are one of those boundaries: the real implementation is the Postgres tables
 `core-sim` owns, which the contract job exercises through the running service. The triager's tables
@@ -9,19 +9,31 @@ ports promise — nothing more, so a test cannot pass on behaviour the database 
 fingerprint writes through the same functions the stores do, so the two cannot disagree about what
 counts as the same request, or about what an entry hashes to.
 
-`free_port` and `wait_until_listening` are what serving an app for real needs, and live here rather
-than in one test module because more than one test module serves one.
+The rest is what more than one test module needs to drive a served stack: `free_port` and
+`wait_until_listening` for serving one at all, `Skeleton` for the whole path from the entry point to
+the audit entry, and the documents a guard test uploads. Those documents are built rather than
+committed, because a test that asserts a page ceiling should build a PDF with the pages it means —
+and because the synthetic corpus those tests will eventually use is ticket 13's work.
 """
 
 from __future__ import annotations
 
+import json
 import socket
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from io import BytesIO
+from typing import TYPE_CHECKING, Final, cast
 from uuid import UUID, uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
+import httpx2
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from pypdf import PdfWriter
+
+from claim_triage.config import GuardSettings
 from claim_triage.contract.models import (
     Claim,
     ClaimDocument,
@@ -40,13 +52,18 @@ from claim_triage.core_sim.store import (
     PolicyNotFound,
     request_fingerprint,
 )
+from claim_triage.guards.ingress import Upload
 from claim_triage.triage import audit
 from claim_triage.triage.audit import AuditEntry, AuditEntryContent
-from claim_triage.triage.run import TriageRun
+from claim_triage.triage.run import RunResult, TriageRun
 from claim_triage.triage.store import TriageStoreUnavailable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
+
+    from opentelemetry.sdk.trace import ReadableSpan
+
+    from claim_triage.telemetry import Telemetry
 
 STARTUP_DEADLINE_SECONDS: float = 10.0
 """How long a served app may take to accept connections before a test fails."""
@@ -263,3 +280,119 @@ class InMemoryTriageTransaction:
 
     def append_entry(self, content: AuditEntryContent) -> AuditEntry:
         return self._store._append(content)
+
+
+PDF: Final = "application/pdf"
+ZIP: Final = "application/zip"
+"""The two content types the ingress takes, as the tests declare them."""
+
+TEST_GUARD: Final = GuardSettings(
+    media_types=frozenset({PDF, ZIP}),
+    max_submission_bytes=8192,
+    max_document_bytes=4096,
+    max_document_pages=3,
+    max_archive_expansion_ratio=100.0,
+    rate_limit_burst=6,
+    rate_limit_refill_per_second=1.0,
+)
+"""A skeleton's guard thresholds: small enough that a test's document is small too, and its burst is
+a number a test can spend. Every field is set, so nothing here depends on an ambient variable."""
+
+
+def pdf(pages: int) -> bytes:
+    """A PDF with as many blank pages as a test needs, so a page ceiling can be a small number."""
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=595, height=842)
+    written = BytesIO()
+    writer.write(written)
+    return written.getvalue()
+
+
+def encrypted_pdf() -> bytes:
+    """A PDF that cannot be read without its password, which is what the ingress refuses."""
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.encrypt("a password the uploader did not send")
+    written = BytesIO()
+    writer.write(written)
+    return written.getvalue()
+
+
+def zip_of(entries: Mapping[str, bytes]) -> bytes:
+    """A zip holding exactly what a test declares, compressed as a caller would compress it."""
+    written = BytesIO()
+    with ZipFile(written, "w", ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+    return written.getvalue()
+
+
+def zip_bomb(expanded: int = 512 * 1024) -> bytes:
+    """A zip bomb: a few hundred bytes that declare half a megabyte of nothing."""
+    return zip_of({"scan.bin": b"\0" * expanded})
+
+
+def upload(
+    content: bytes, *, media_type: str = PDF, filename: str = "oznamenie-skody.pdf"
+) -> Upload:
+    """One document as it arrives at the boundary, for the tests that never serve one."""
+    return Upload(filename=filename, media_type=media_type, content=content)
+
+
+CLAIM: dict[str, object] = {
+    "policy_number": "SIM-2026-0001",
+    "incident_date": "2026-03-14",
+    "claim_amount_eur": "1840.50",
+}
+"""A claim against one of the policies the systems hold, as the entry point takes it."""
+
+
+@dataclass(frozen=True, slots=True)
+class Skeleton:
+    """A walking skeleton, wired the way the stack wires it, and the pieces to assert on."""
+
+    api_url: str
+    systems: InMemoryCoreSim
+    triage: InMemoryTriageStore
+    exporter: InMemorySpanExporter
+    _traces: tuple[Telemetry, ...] = field(default_factory=tuple)
+
+    def submit(self, **claim: object) -> httpx2.Response:
+        """Post a claim at the entry point, and answer with whatever the boundary answered."""
+        return self.upload(**claim)
+
+    def upload(self, *documents: Upload, **claim: object) -> httpx2.Response:
+        """Post a claim with documents attached, which is what the ingress screens."""
+        with httpx2.Client(base_url=self.api_url) as client:
+            return client.post(
+                "/claims",
+                data={"claim": json.dumps({**CLAIM, **claim})},
+                files=[
+                    ("documents", (document.filename, document.content, document.media_type))
+                    for document in documents
+                ],
+            )
+
+    def submit_ok(self, **claim: object) -> RunResult:
+        """Post a claim the skeleton is expected to carry, and parse the run it answered with."""
+        response = self.submit(**claim)
+        assert response.status_code == 201, response.text
+        return RunResult.model_validate(response.json())
+
+    def upload_ok(self, *documents: Upload, **claim: object) -> RunResult:
+        """Post a claim with documents the skeleton is expected to carry, and parse the run."""
+        response = self.upload(*documents, **claim)
+        assert response.status_code == 201, response.text
+        return RunResult.model_validate(response.json())
+
+    def readiness(self) -> httpx2.Response:
+        """What the entry point answers when asked whether it can serve right now."""
+        with httpx2.Client(base_url=self.api_url) as client:
+            return client.get("/healthz")
+
+    def drained(self) -> tuple[ReadableSpan, ...]:
+        """Every span the run produced: they are batched, so this is what flushes them out."""
+        for traces in self._traces:
+            traces.flush()
+        return tuple(self.exporter.get_finished_spans())

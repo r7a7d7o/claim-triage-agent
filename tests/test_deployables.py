@@ -48,9 +48,17 @@ SHARED_VARIABLES = (
     "MODEL_API_KEY",
     "MODEL_FIXTURES",
     "MODEL_TIMEOUT_SECONDS",
+    # The guard thresholds, resolved by every deployable for the same reason (ticket 06): a
+    # deployment states what the guards allow wherever the guard runs, not only where it is used.
+    "GUARD_MEDIA_TYPES",
+    "GUARD_MAX_DOCUMENT_BYTES",
+    "GUARD_MAX_DOCUMENT_PAGES",
+    "GUARD_MAX_ARCHIVE_EXPANSION_RATIO",
+    "GUARD_RATE_LIMIT_BURST",
+    "GUARD_RATE_LIMIT_REFILL_PER_SECOND",
 )
-"""The environment variables every deployable resolves: infrastructure and the model, as opposed to
-the bind address each deployable owns. `_isolated` clears exactly these."""
+"""The environment variables every deployable resolves: infrastructure, the model and the guards, as
+opposed to the bind address each deployable owns. `_isolated` clears exactly these."""
 
 SERVES: tuple[str, ...] = ("core-sim", "triager", "api")
 """The deployables that serve a surface, so their console scripts run until they are stopped.
@@ -234,6 +242,83 @@ def test_the_startup_report_names_the_model_arm_and_never_its_key(
     assert report["model_base_url"] == "http://model.internal:11434/v1"
     assert report["model_name"] == "local-model"
     assert key not in captured
+
+
+def test_the_startup_report_states_the_guard_thresholds_it_would_enforce(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A deployment's safety thresholds are policy: the report says which ones it runs with."""
+    _isolated(monkeypatch, tmp_path)
+
+    assert _console_script("claim-triage-extraction")() == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["guard"] == {
+        "media_types": ["application/pdf", "application/zip"],
+        "max_submission_bytes": 32 * 1024 * 1024,
+        "max_document_bytes": 8 * 1024 * 1024,
+        "max_document_pages": 40,
+        "max_archive_expansion_ratio": 100.0,
+        "rate_limit_burst": 20,
+        "rate_limit_refill_per_second": 5.0,
+    }
+
+    _isolated(
+        monkeypatch,
+        tmp_path,
+        CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_PAGES="8",
+        CLAIM_TRIAGE_GUARD_MEDIA_TYPES='["application/pdf"]',
+    )
+
+    assert _console_script("claim-triage-extraction")() == 0
+
+    changed = json.loads(capsys.readouterr().out)
+    assert changed["guard"]["max_document_pages"] == 8
+    assert changed["guard"]["media_types"] == ["application/pdf"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "application/pdf", '{"application/pdf": true}'],
+    ids=["empty", "not-json", "not-a-list"],
+)
+def test_a_media_type_list_that_is_not_a_list_of_media_types_is_rejected_or_unset(
+    value: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The list is JSON, and an empty variable is unset — both answered where they are written."""
+    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_GUARD_MEDIA_TYPES=value)
+
+    exit_code = _console_script("claim-triage-extraction")()
+    captured = capsys.readouterr()
+
+    if value == "":
+        assert exit_code == 0
+        assert json.loads(captured.out)["guard"]["media_types"] == [
+            "application/pdf",
+            "application/zip",
+        ]
+    else:
+        assert exit_code == 2
+        assert "CLAIM_TRIAGE_GUARD_MEDIA_TYPES" in captured.err
+
+
+def test_a_guard_threshold_that_could_not_be_enforced_is_rejected_naming_the_variable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Zero pages is a mistake rather than a policy: it fails where it is written, as the model
+    configuration does."""
+    _isolated(monkeypatch, tmp_path, CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_PAGES="0")
+
+    assert _console_script("claim-triage-extraction")() == 2
+
+    assert "CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_PAGES" in capsys.readouterr().err
 
 
 def test_replay_is_the_arm_an_unconfigured_deployment_reports(

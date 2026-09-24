@@ -18,6 +18,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from claim_triage.contract.models import ClaimStatus, ClaimSubmission
+from claim_triage.guards.verdict import DocumentVerdicts
 
 DEFAULT_EXPERIMENT: Final = "baseline"
 """The arm that runs when nothing else is asked for."""
@@ -39,9 +40,16 @@ class RunRequest(IntakeRequest):
     The run identifier is minted at the entry point rather than inside the pipeline, so the whole
     path — every span, every log line, every audit entry — can be joined on one identifier that
     exists before the first call is made.
+
+    The ingress's verdicts travel with the submission rather than being derived again here: the
+    bytes they are about stopped at the boundary that screened them, and what the triager records is
+    what the run was admitted with. Nothing re-checks them, so a caller inside the boundary could
+    send verdicts that never happened — the hop is unauthenticated in this increment, and the
+    guardrail policy deployable that will serve them (`docs/adr/0007`) is where that changes.
     """
 
     run_id: UUID
+    guard_verdicts: list[DocumentVerdicts]
 
 
 class RunResult(BaseModel):
@@ -61,6 +69,9 @@ class TriageRun(BaseModel):
     """One pass of a claim through the graph, as the triager records it.
 
     This is the state change the audit entry is written with: it exists only where the entry does.
+    `guard_verdicts` is what the run was let in with — one entry per uploaded document, each saying
+    what every ingress check answered about it — so a run can be read back months later together
+    with the evidence it was admitted on.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -70,6 +81,7 @@ class TriageRun(BaseModel):
     experiment: str
     variant: str
     status: ClaimStatus
+    guard_verdicts: list[DocumentVerdicts]
     trace_id: str
     started_at: datetime
     completed_at: datetime
