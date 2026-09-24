@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Final
+from enum import StrEnum
+from pathlib import Path
+from typing import Any, Final, Self
 
-from pydantic import SecretStr, field_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_PREFIX: Final = "CLAIM_TRIAGE_"
 DEFAULT_ENV_FILE: Final = ".env"
+MODEL_ENV_PREFIX: Final = f"{ENV_PREFIX}MODEL_"
+"""The model's configuration shares one prefix across every deployable: `CLAIM_TRIAGE_MODEL_`."""
+
+DEFAULT_MODEL_FIXTURES: Final = Path(__file__).parent / "model" / "fixtures"
+"""Where the replay adapter reads its answers from, unless configuration points somewhere else."""
+
+DEFAULT_MODEL_TIMEOUT_SECONDS: Final = 30.0
+"""How long one call to an endpoint may take before it counts as unreachable. A model is slower than
+the surrounding systems, whose own client waits 5 seconds (`claim_triage.contract.client`)."""
 
 
 def service_env_prefix(service: str) -> str:
@@ -58,3 +69,69 @@ class ServiceSettings(BaseSettings):
 
     host: str = "127.0.0.1"
     port: int | None = None
+
+
+class ModelProvider(StrEnum):
+    """The model implementations configuration can select.
+
+    The names are the adapters' own (`claim_triage.model.select`), so a deployment says which one it
+    runs in the one vocabulary the repository uses for it.
+    """
+
+    REPLAY = "replay"
+    PROVIDER = "provider"
+
+
+class ModelSettings(BaseSettings):
+    """Which model answers a call, and where it lives when it is not the one in this repository.
+
+    Replay needs nothing configured, and is what an unconfigured environment gets: a run, a test and
+    a CI job then need no endpoint and no credential. Naming the provider adapter is what asks for
+    an endpoint and a model name, and the key stays optional, because a local endpoint has none. An
+    empty value means unset, as the observability endpoints do: compose passes its own variables
+    through as empty strings.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix=MODEL_ENV_PREFIX, env_file=DEFAULT_ENV_FILE, extra="ignore"
+    )
+
+    provider: ModelProvider = ModelProvider.REPLAY
+    base_url: str = ""
+    """The endpoint's own root, empty while none is configured, version prefix included."""
+    name: str = ""
+    """The model the endpoint is asked for, empty while none is configured."""
+    api_key: SecretStr | None = None
+    fixtures: Path = DEFAULT_MODEL_FIXTURES
+    timeout_seconds: float = DEFAULT_MODEL_TIMEOUT_SECONDS
+
+    @model_validator(mode="before")
+    @classmethod
+    def _an_empty_variable_is_unset(cls, values: Any) -> Any:
+        """An empty variable leaves its field at the default.
+
+        Compose passes the variables it declares through as empty strings, and an exported-but-empty
+        variable is one nobody set. Read as a value, an empty fixtures directory would be the
+        working directory and an empty model name a model nobody named; dropped, what is left is
+        what this file says each field is.
+        """
+        if not isinstance(values, dict):
+            return values
+        return {field: value for field, value in values.items() if value != ""}
+
+    @model_validator(mode="after")
+    def _the_provider_adapter_needs_a_destination(self) -> Self:
+        """A selection that cannot answer a call is rejected where it is configured."""
+        if self.provider is ModelProvider.REPLAY:
+            return self
+        unset = [
+            variable
+            for variable, value in (
+                (f"{MODEL_ENV_PREFIX}BASE_URL", self.base_url),
+                (f"{MODEL_ENV_PREFIX}NAME", self.name),
+            )
+            if not value
+        ]
+        if unset:
+            raise ValueError(f"the provider adapter needs {' and '.join(unset)}")
+        return self

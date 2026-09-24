@@ -21,7 +21,9 @@ from pydantic import ValidationError
 from claim_triage import DISTRIBUTION
 from claim_triage.config import (
     ENV_PREFIX,
+    MODEL_ENV_PREFIX,
     InfrastructureSettings,
+    ModelSettings,
     ServiceSettings,
     service_env_prefix,
 )
@@ -62,6 +64,7 @@ class Resolution:
     host: str
     port: int
     infrastructure: InfrastructureSettings
+    model: ModelSettings
 
     def report(self) -> dict[str, Any]:
         """The startup report: what this process is, where it binds, and what it is wired to."""
@@ -80,6 +83,11 @@ class Resolution:
             "triager_base_url": self.infrastructure.triager_base_url,
             "otel_endpoint": self.infrastructure.otel_endpoint,
             "langfuse_host": self.infrastructure.langfuse_host,
+            # Which model this process would answer a call with. The key is deliberately absent:
+            # a startup report is read from logs and pasted into issues.
+            "model_provider": self.model.provider.value,
+            "model_name": self.model.name or None,
+            "model_base_url": self.model.base_url or None,
         }
 
 
@@ -90,6 +98,7 @@ def resolve(name: str) -> Resolution:
 
     try:
         infrastructure = InfrastructureSettings()
+        model = ModelSettings()
         bind = ServiceSettings(_env_prefix=prefix)
     except ValidationError as rejected:
         raise ConfigurationRejected(rejected.errors(), _environment_variables(prefix)) from None
@@ -99,6 +108,7 @@ def resolve(name: str) -> Resolution:
         host=bind.host,
         port=service.default_port if bind.port is None else bind.port,
         infrastructure=infrastructure,
+        model=model,
     )
 
 
@@ -127,5 +137,6 @@ def _environment_variables(prefix: str) -> dict[str, str]:
     """Map every configured field to the variable that sets it, for naming it in a rejection."""
     return {
         **{field: f"{ENV_PREFIX}{field.upper()}" for field in InfrastructureSettings.model_fields},
+        **{field: f"{MODEL_ENV_PREFIX}{field.upper()}" for field in ModelSettings.model_fields},
         **{field: f"{prefix}{field.upper()}" for field in ServiceSettings.model_fields},
     }
