@@ -12,18 +12,22 @@ evaluated against committed golden sets.
 
 ## Status
 
-v0.1 `walking-skeleton`. The thinnest complete path is in place. A claim posted at the entry point is
-carried through the graph skeleton to the surrounding systems, which are told where it got to; the
-run's state change and its hash-chained audit entry commit in one transaction; and one OpenTelemetry
-trace spans the entry point and the run, carrying the run, claim, experiment and variant. With the
+v0.1 `walking-skeleton`. The thinnest complete path is in place. A claim posted at the entry point,
+with whatever documents it carries, is screened at ingress and carried through the graph skeleton to
+the surrounding systems, which are told where it got to; the run's state change and its hash-chained
+audit entry commit in one transaction, with the guard verdicts the claim was admitted on; and one
+OpenTelemetry trace spans the entry point and the run, carrying the run, claim, experiment and
+variant. With the
 tracing backend down the same run completes on structured JSON logs, and replay is the default arm,
 so nothing needs a credential. The seven deployables each start, resolve and validate their
 configuration and report it — the three with a surface (`core-sim`, `triager`, `api`) serve it. The
 compose stack comes up on one command with no credentials; the container job builds the image, scans
 it and drives one claim through the running stack at its entry point. The model sits behind a port
 with a replay adapter and a provider adapter, selected by configuration, so nothing needs a credential
-to run — no stage asks it for anything yet, which is what v0.2's extraction does. The guard seam and
-the evaluation harness arrive in the remaining v0.1 tickets.
+to run — no stage asks it for anything yet, which is what v0.2's extraction does. The guard seam is in
+place: the entry point screens the documents of a submission — content type, size, page count,
+encryption and archive expansion — refuses a caller past its burst, and records the verdicts that let
+a claim in on the run and in its audit entry. The evaluation harness arrives in the last v0.1 ticket.
 
 ## Unaffiliated, and synthetic or openly licensed data
 
@@ -88,8 +92,14 @@ uv run claim-triage-triager &        # :8001
 uv run claim-triage-api &            # :8000
 uv run claim-triage-smoke            # one claim through the entry point, end to end
 curl --request POST localhost:8000/claims \
-  --header 'content-type: application/json' \
-  --data '{"policy_number":"SIM-2026-0001","incident_date":"2026-03-14","claim_amount_eur":"1840.50"}'
+  --form 'claim={"policy_number":"SIM-2026-0001","incident_date":"2026-03-14","claim_amount_eur":"1840.50"}'
+
+# With a document, which the entry point screens before the pipeline is reached. Any PDF inside the
+# ingress ceilings stands in for one: the synthetic claim-document corpus arrives in v0.2 (ticket 13),
+# and the committed sample below is a 10-page, 107 KiB document that passes every check.
+curl --request POST localhost:8000/claims \
+  --form 'claim={"policy_number":"SIM-2026-0001","incident_date":"2026-03-14","claim_amount_eur":"1840.50"}' \
+  --form documents=@sample/pzp_vseobecneobchodne_podmienky_vpp_platne_od1-10-2019.pdf
 ```
 
 ## Layout
@@ -107,6 +117,9 @@ src/claim_triage/codegen.py
                         the generator `uv run poe generate` runs over that document
 src/claim_triage/boundary.py
                         what our own surfaces answer when a call cannot be served
+src/claim_triage/guards/
+                        the guard layers: the verdict vocabulary, the ingress checks over an
+                        upload, and the rate limit in front of the boundary
 src/claim_triage/telemetry.py
                         the tracing and structured-logging seam every deployable configures
 src/claim_triage/services/registry.py
@@ -158,14 +171,18 @@ The thinnest complete path, and the surfaces it crosses:
 
 ```
 POST /claims ──► api ──► triager ──► graph skeleton ──┐
-                │           │                          │
-                │           ├─ state change + audit entry, one transaction
-                │           └─ status update ──► core-sim (the system of record)
-                └─ one span, joined to the run's span ──► OTLP, or the structured logs
+(multipart)      │           │                          │
+                 │           ├─ state change + audit entry, one transaction
+                 │           └─ status update ──► core-sim (the system of record)
+                 ├─ ingress: every document screened, its verdicts travel with the run
+                 └─ one span, joined to the run's span ──► OTLP, or the structured logs
 ```
 
-1. **The entry point** mints the run identifier — so every span, log line and audit entry along the
-   path can be joined on it — opens the span the trace starts at, and forwards the claim.
+1. **The entry point** screens the submission at ingress — the claim is parsed, every document is
+   checked, and a caller past its burst waits — then mints the run identifier, so every span, log
+   line and audit entry along the path can be joined on it, opens the span the trace starts at, and
+   forwards the claim with the verdicts of what was let in. A refusal stops here: the triager is
+   never reached and nothing is recorded.
 2. **The triager** hands the claim to the surrounding systems, which are the system of record for it,
    carries it through the graph skeleton, and reads the status it ended with. The skeleton is one
    no-op node: the topology's stages land in that node one ticket at a time.
@@ -191,6 +208,51 @@ CLAIM_TRIAGE_OTEL_ENDPOINT=http://otel-collector:4318 \
 podman compose --profile smoke run --rm smoke
 podman compose logs otel-collector            # the spans, with run, claim, experiment, variant
 ```
+
+## The guard seam
+
+The guard layers answer with **values**: a check returns a `Verdict` — which check asked, whether it
+let the thing through, and what it found — grouped per document, and the run carries the verdicts it
+was admitted on into its audit entry, where the chain covers them like every other field. Nothing
+about a refusal is known only to the code that raised it, and a check is a typed function over a
+typed value, so `tests/test_guard_ingress.py` asserts every one of them without a socket, a database
+or a clock it does not own. `docs/adr/0007` records the design and what it costs.
+
+Six layers are specified; **v0.1 ships the first, ingress**, and the rest arrive with the work they
+check. What it does now, per uploaded document:
+
+|Check|Refuses|As|
+|---|---|---|
+|size|an upload past `CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_BYTES`, read one byte past the ceiling and no further|413 `payload_too_large`|
+|media type|a declared type the boundary does not take|415 `unsupported_media_type`|
+|structure|bytes that are not the document they claim to be — including anything the PDF reader raises|422 `document_refused`|
+|encryption|a PDF the reader reports as encrypted — whether or not an empty password would open it, because the boundary does not guess passwords|422 `document_refused`|
+|archive|a zip whose own directory declares an expansion past `…_MAX_ARCHIVE_EXPANSION_RATIO`|422 `document_refused`|
+|page count|more pages than `CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_PAGES`|422 `document_refused`|
+
+One check runs before any of those, because it is about the submission rather than a document in it:
+a request that **declares** more bytes than `CLAIM_TRIAGE_GUARD_MAX_SUBMISSION_BYTES` is refused
+unread, with the multipart parser never having seen the body. That is what keeps a hostile upload from
+being spooled to disk to be refused afterwards. A submission that declares no length — a chunked one —
+cannot be judged that way: the framework spools it before a route sees it, and the per-document
+ceiling is what bounds it from there. The honest reading is in `docs/adr/0007`.
+
+The first refusal of a document stops its remaining checks, every refusal names the document and the
+check in `detail`, and a refused submission leaves nothing behind — no claim in the surrounding
+systems, no run, no audit entry. A document inside every limit is carried, and the verdicts that let
+it in are on the run and in its audit entry, so a claim can be read back months later together with
+the evidence it was admitted on.
+
+The rate limit in front of the boundary is a token bucket per caller: `…_RATE_LIMIT_BURST`
+submissions back to back, then one every `1 / …_RATE_LIMIT_REFILL_PER_SECOND` seconds, answered
+`429 rate_limited` with `Retry-After`. It is **per replica and in-process** — N replicas allow N times
+the burst, and a restart forgets the counts — which `docs/adr/0007` states rather than leaves to be
+discovered. Readiness is not limited: a throttled health check would be an outage the limiter caused.
+
+What the ingress deliberately does not do yet, so that it is not assumed: no ceiling on the number of
+documents in one submission (their bytes are bounded, their count is not), no early refusal of a
+chunked submission, no content inspection beyond the declared type and the document's own structure,
+and no image document classes — those arrive with scanned intake in v0.4.
 
 ## The surrounding systems' contract
 
@@ -318,11 +380,23 @@ to run locally.
 |`CLAIM_TRIAGE_MODEL_API_KEY`|all|bearer key for the endpoint, if it wants one; never reported|unset|
 |`CLAIM_TRIAGE_MODEL_FIXTURES`|all|where the replay adapter reads its answers|`src/claim_triage/model/fixtures`|
 |`CLAIM_TRIAGE_MODEL_TIMEOUT_SECONDS`|all|how long one call to an endpoint may take|`30`|
+|`CLAIM_TRIAGE_GUARD_MEDIA_TYPES`|all|what the ingress takes, as a JSON array of media types|`["application/pdf","application/zip"]`|
+|`CLAIM_TRIAGE_GUARD_MAX_SUBMISSION_BYTES`|all|largest submission the ingress accepts, refused unread past it|`33554432`|
+|`CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_BYTES`|all|largest document the ingress takes|`8388608`|
+|`CLAIM_TRIAGE_GUARD_MAX_DOCUMENT_PAGES`|all|most pages one PDF may hold|`40`|
+|`CLAIM_TRIAGE_GUARD_MAX_ARCHIVE_EXPANSION_RATIO`|all|largest expansion a zip may declare|`100`|
+|`CLAIM_TRIAGE_GUARD_RATE_LIMIT_BURST`|all|submissions one caller may make back to back|`20`|
+|`CLAIM_TRIAGE_GUARD_RATE_LIMIT_REFILL_PER_SECOND`|all|submissions per second, per caller, once the burst is spent|`5`|
 |`CLAIM_TRIAGE_<DEPLOYABLE>_HOST`|per deployable, e.g. `CLAIM_TRIAGE_API_HOST`|bind host|`127.0.0.1`|
 |`CLAIM_TRIAGE_<DEPLOYABLE>_PORT`|per deployable, e.g. `CLAIM_TRIAGE_API_PORT`|bind port|the table above|
 
 A deployable's name is upper-cased and its dashes become underscores in the variable, so
 `reviewer-ui` takes `CLAIM_TRIAGE_REVIEWER_UI_PORT` and `core-sim` takes `CLAIM_TRIAGE_CORE_SIM_PORT`.
+
+The `CLAIM_TRIAGE_GUARD_*` variables are the guard layers' thresholds, and the ones read by whichever
+deployable runs a guard — the entry point, today. `…_MEDIA_TYPES` is a JSON array, because a list has
+no separator that cannot appear in a media type; every other threshold is a number, and a threshold
+that could not be enforced (zero, or negative) is rejected at startup naming its variable.
 
 The `…_HOST_PORT` variables are read by Compose, not by the application, and only the host side of a
 published port moves: the stack keeps using the standard port across its own network.
