@@ -3,10 +3,9 @@
 Every deployable resolves its configuration from the environment before it does anything else, and
 reports it as one JSON line on stdout. A configuration it cannot accept is reported on stderr,
 naming the environment variable that was rejected, and exits 2. `resolve_and_report` is the
-handover: a
-deployable whose surface has not landed yet returns the exit code straight away (see
-`tests/test_deployables.py`), while a deployable that serves something — `core-sim`, from ticket
-02 — keeps the report and starts its server.
+handover: a deployable whose surface has not landed yet returns the exit code straight away (see
+`tests/test_deployables.py`), while a deployable that serves something — `core-sim` from ticket 02,
+`triager` and `api` from ticket 04 — keeps the report and starts its server.
 """
 
 from __future__ import annotations

@@ -2,7 +2,8 @@
 #
 # Every service in `compose.yaml` runs from this image, so the developer's stack and the CI container
 # jobs exercise the same artefact. A service declares its own health check in `compose.yaml`, because
-# what "ready" means differs per deployable and only `core-sim` serves a health route today.
+# what "ready" means differs per deployable: each one that serves a surface answers on `/healthz`
+# with what ready means for it, and a service that needs another waits on that check.
 #
 # Build the shipped artefact with `--squash-all`:
 #
