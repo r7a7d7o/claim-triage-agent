@@ -36,7 +36,7 @@ from claim_triage.evaluation.metrics import (
     macro_average,
     reciprocal_rank,
 )
-from claim_triage.evaluation.scoring import field_metric, is_metric
+from claim_triage.evaluation.scoring import field_metric, is_metric, measure
 from claim_triage.evaluation.sets import (
     ClauseRef,
     ExtractionCase,
@@ -198,6 +198,15 @@ def test_a_set_saved_in_another_encoding_is_refused(tmp_path: Path) -> None:
         read_set(path, ExtractionCase)
 
 
+def test_a_set_file_with_no_line_at_all_is_refused(tmp_path: Path) -> None:
+    """A placeholder is a header and no case; a file with nothing in it has not even said that."""
+    path = tmp_path / "extraction.jsonl"
+    path.write_text("", encoding="utf-8")
+
+    with pytest.raises(Unreadable, match="is empty: a set states its capability and version first"):
+        read_set(path, ExtractionCase)
+
+
 def test_a_directory_holding_no_set_for_a_capability_is_refused(tmp_path: Path) -> None:
     """A run scores all three capabilities: a missing file is a run that cannot be made."""
     write_lines(tmp_path / "extraction.jsonl", EXTRACTION_HEADER)
@@ -235,6 +244,21 @@ def test_answers_about_a_case_the_set_does_not_hold_are_refused(tmp_path: Path) 
     )
 
     with pytest.raises(Unreadable, match=r"does not hold"):
+        read_answers(tmp_path / "answers", sets)
+
+
+def test_an_answer_naming_a_field_that_is_not_a_field_name_is_refused(tmp_path: Path) -> None:
+    """An answer's field names become metric names as a case's do, so they are held alike."""
+    sets = the_three_sets(tmp_path / "golden", extraction=(NOTIFICATION,))
+    write_lines(
+        tmp_path / "answers" / "extraction.jsonl",
+        {
+            "case_id": "synthetic-notification-0001",
+            "answer": {"fields": {"Claim Amount": "1840.50"}},
+        },
+    )
+
+    with pytest.raises(Unreadable, match="'Claim Amount' is not a field name"):
         read_answers(tmp_path / "answers", sets)
 
 
@@ -357,6 +381,91 @@ def test_a_label_the_cases_never_label_with_is_not_a_class_of_its_own() -> None:
     assert counted["low"] == Counts(false_negatives=1)
     assert counted["high"] == Counts(true_positives=1)
     assert macro_average(counted, lambda counts: counts.recall) == 0.5
+
+
+def test_a_retrieval_that_cited_nothing_measures_no_citation_validity(tmp_path: Path) -> None:
+    """Nothing cited is not nothing valid: the metric is absent, and coverage is what notices."""
+    golden = the_three_sets(tmp_path / "golden", retrieval=(RETRIEVAL_CASE,))
+    write_lines(
+        tmp_path / "answers" / "retrieval.jsonl",
+        {
+            "case_id": "retrieval-0001",
+            "answer": {
+                "retrieved": [{"clause_id": "USK/PVO/24-4.2", "edition": "USK/PVO/24", "page": 7}]
+            },
+        },
+    )
+    answers = read_answers(tmp_path / "answers", golden)
+
+    _, retrieval, _ = measure(golden, answers)
+
+    assert "retrieval.hit_rate" in retrieval.metrics
+    assert "retrieval.citation_validity" not in retrieval.metrics
+
+
+def test_a_classification_case_nothing_answered_is_a_miss_and_scores_nothing(
+    tmp_path: Path,
+) -> None:
+    """An unanswered case is a miss on the bands and on routing, and has no score to rank."""
+    golden = the_three_sets(
+        tmp_path / "golden",
+        classification=(
+            CLASSIFICATION_CASE,
+            {**CLASSIFICATION_CASE, "case_id": "classification-0002", "fraud_positive": True},
+        ),
+    )
+    write_lines(
+        tmp_path / "answers" / "classification.jsonl",
+        {
+            "case_id": "classification-0001",
+            "answer": {
+                "fraud_score": 0.1,
+                "fraud_risk": "low",
+                "severity": "minor",
+                "queue": "fast-lane",
+            },
+        },
+    )
+    answers = read_answers(tmp_path / "answers", golden)
+
+    _, _, classification = measure(golden, answers)
+
+    assert classification.answered == 1
+    assert classification.metrics["classification.routing_accuracy"] == 0.5
+    assert classification.metrics["classification.fraud_risk.recall"] == 0.5
+
+
+def test_a_classification_of_one_label_measures_no_precision_recall_area(tmp_path: Path) -> None:
+    """A set with no negative case has nothing to rank a positive against: no curve."""
+    golden = the_three_sets(
+        tmp_path / "golden",
+        classification=(
+            {
+                **CLASSIFICATION_CASE,
+                "fraud_positive": True,
+                "fraud_risk": "high",
+                "queue": "review",
+            },
+        ),
+    )
+    write_lines(
+        tmp_path / "answers" / "classification.jsonl",
+        {
+            "case_id": "classification-0001",
+            "answer": {
+                "fraud_score": 0.9,
+                "fraud_risk": "high",
+                "severity": "minor",
+                "queue": "review",
+            },
+        },
+    )
+    answers = read_answers(tmp_path / "answers", golden)
+
+    _, _, classification = measure(golden, answers)
+
+    assert "classification.routing_accuracy" in classification.metrics
+    assert "classification.fraud_pr_auc" not in classification.metrics
 
 
 def test_the_first_k_of_a_ranking_is_what_a_hit_reads() -> None:

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Final
 
 import pytest
 
+from claim_triage.evaluation import runner
 from claim_triage.evaluation.baselines import (
     Baseline,
     SetRecord,
@@ -367,6 +368,63 @@ def test_recording_to_a_file_that_records_another_tag_is_refused(
     assert fixture_run("--baseline", str(other), "--tag", "v9.9.9", "--record") == UNRUNNABLE
 
     assert "records 'v8.8.8' where this run records 'v9.9.9'" in capsys.readouterr().err
+
+
+def test_a_baseline_that_records_no_set_for_a_capability_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A baseline is a record of all three: one that forgot a capability is not one."""
+    incomplete = tmp_path / "v9.9.9.json"
+    document = json.loads(a_baseline({}, tag="v9.9.9").model_dump_json())
+    del document["sets"]["classification"]
+    incomplete.write_text(json.dumps(document), encoding="utf-8")
+
+    assert fixture_run("--baseline", str(incomplete), "--tag", "v9.9.9") == UNRUNNABLE
+
+    assert "no set recorded for classification" in capsys.readouterr().err
+
+
+def test_a_baseline_recording_a_value_that_is_not_a_proportion_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A baseline value outside zero to one is a typo, not something to do arithmetic with."""
+    impossible = tmp_path / "v9.9.9.json"
+    document = json.loads(a_baseline({}, tag="v9.9.9").model_dump_json())
+    document["metrics"] = {"extraction.f1": 1.2}
+    impossible.write_text(json.dumps(document), encoding="utf-8")
+
+    assert fixture_run("--baseline", str(impossible), "--tag", "v9.9.9") == UNRUNNABLE
+
+    assert "which is not a proportion" in capsys.readouterr().err
+
+
+def test_the_store_refuses_a_file_that_records_another_tag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """One file per tag: a file recording another is refused, not judged as this tag's."""
+    monkeypatch.setattr(runner, "DEFAULT_BASELINES", tmp_path)
+    (tmp_path / "v9.9.9.json").write_text(
+        a_baseline({}, tag="v8.8.8").model_dump_json(), encoding="utf-8"
+    )
+
+    assert main(["--sets", str(FIXTURE_GOLDEN), "--tag", "v9.9.9"]) == UNRUNNABLE
+
+    assert "records 'v8.8.8', not 'v9.9.9'" in capsys.readouterr().err
+
+
+def test_rules_declaring_a_floor_outside_zero_and_one_are_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A floor above one can never be met; one below zero can never be broken. Neither is a rule."""
+    rules = tmp_path / "gate.json"
+    rules.write_text(
+        json.dumps({"tolerance": TOLERANCE, "floors": {"retrieval.citation_validity": 1.5}}),
+        encoding="utf-8",
+    )
+
+    assert fixture_run("--rules", str(rules)) == UNRUNNABLE
+
+    assert "which is not a proportion" in capsys.readouterr().err
 
 
 def test_a_baseline_recording_a_metric_nobody_measures_is_refused(
