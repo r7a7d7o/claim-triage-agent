@@ -3,10 +3,9 @@
 Every deployable resolves its configuration from the environment before it does anything else, and
 reports it as one JSON line on stdout. A configuration it cannot accept is reported on stderr,
 naming the environment variable that was rejected, and exits 2. `resolve_and_report` is the
-handover: a
-deployable whose surface has not landed yet returns the exit code straight away (see
-`tests/test_deployables.py`), while a deployable that serves something — `core-sim`, from ticket
-02 — keeps the report and starts its server.
+handover: a deployable whose surface has not landed yet returns the exit code straight away (see
+`tests/test_deployables.py`), while a deployable that serves something — `core-sim` from ticket 02,
+`triager` and `api` from ticket 04 — keeps the report and starts its server.
 """
 
 from __future__ import annotations
@@ -19,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from pydantic import ValidationError
 
+from claim_triage import DISTRIBUTION
 from claim_triage.config import (
     ENV_PREFIX,
     InfrastructureSettings,
@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 
 EXIT_OK: Final = 0
 EXIT_CONFIG_REJECTED: Final = 2
-DISTRIBUTION: Final = "claim-triage-agent"
 
 
 class ConfigurationRejected(Exception):
@@ -77,6 +76,8 @@ class Resolution:
             "redis_url": self.infrastructure.redis_url,
             "qdrant_url": self.infrastructure.qdrant_url,
             "core_sim_base_url": self.infrastructure.core_sim_base_url,
+            "api_base_url": self.infrastructure.api_base_url,
+            "triager_base_url": self.infrastructure.triager_base_url,
             "otel_endpoint": self.infrastructure.otel_endpoint,
             "langfuse_host": self.infrastructure.langfuse_host,
         }

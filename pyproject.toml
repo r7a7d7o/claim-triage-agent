@@ -12,6 +12,9 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi>=0.116",
     "httpx2>=2.13.1",
+    "langgraph>=1.2.12",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
     "uvicorn>=0.35",
@@ -49,6 +52,8 @@ types = "mypy src tests"
 unit = "pytest"
 # The contract tests need a running service and a real Postgres; the unit job must not collect them.
 contract = "pytest -m contract"
+# The audit transaction is a property of the database, so these need the same Postgres and nothing else.
+postgres = "pytest -m postgres"
 # The contract package is generated from contracts/core-sim.openapi.yaml, and committed.
 generate = "python -m claim_triage.codegen"
 check = ["lint", "types", "unit"]
@@ -67,6 +72,11 @@ python_version = "3.13"
 strict = true
 files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
+# Two `conftest` modules, one per test directory: deriving module names from these bases keeps them
+# distinct instead of reporting a duplicate module. `tests` is on the path because the modules beside
+# a test import each other by bare name (`support`).
+explicit_package_bases = true
+mypy_path = "src:tests"
 
 [[tool.mypy.overrides]]
 module = "pydantic_settings.*"
@@ -81,5 +91,8 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 # The contract tests drive a running service and a real Postgres, so the default run leaves them out
 # and `poe contract` is what asks for them.
-addopts = "-q -m 'not contract'"
-markers = ["contract: drives the generated client against a running core-sim (poe contract)"]
+addopts = "-q -m 'not contract and not postgres'"
+markers = [
+    "contract: drives the generated client against a running core-sim (poe contract)",
+    "postgres: needs the stack's Postgres, and nothing else (poe postgres)",
+]

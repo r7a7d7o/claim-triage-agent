@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_PREFIX: Final = "CLAIM_TRIAGE_"
@@ -35,8 +35,16 @@ class InfrastructureSettings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     qdrant_url: str = "http://localhost:6333"
     core_sim_base_url: str = "http://localhost:8080"
+    api_base_url: str = "http://localhost:8000"
+    triager_base_url: str = "http://localhost:8001"
     otel_endpoint: str | None = None
     langfuse_host: str | None = None
+
+    @field_validator("otel_endpoint", "langfuse_host", mode="before")
+    @classmethod
+    def _unset_when_empty(cls, value: object) -> object:
+        """An empty value means unset: compose passes its own variables through as empty."""
+        return None if value == "" else value
 
 
 class ServiceSettings(BaseSettings):

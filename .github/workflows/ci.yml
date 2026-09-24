@@ -49,6 +49,9 @@ jobs:
       - run: uv sync --locked
       - run: uv run poe unit
 
+  # Postgres is what both of these jobs' tests need, and neither is a unit test: the contract job
+  # drives a generated client against a running service, and the audit transaction is a property of
+  # the database rather than of the code that asks for one.
   contract:
     name: contract
     runs-on: ubuntu-latest
@@ -79,6 +82,11 @@ jobs:
 
       - name: Drive the generated client against the running service
         run: uv run poe contract
+
+      # Same Postgres, same job: the state change and its audit entry are one transaction, and that
+      # is only convincing where the transaction is real.
+      - name: Prove the audit transaction against Postgres
+        run: uv run poe postgres
 
       - name: Report the stack's logs if the run failed
         if: failure()

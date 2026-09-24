@@ -1,0 +1,39 @@
+# The tracing backend of the development stack, under the `observability` profile.
+#
+# OpenTelemetry is the seam rather than a vendor SDK, so this is the one place a backend is named:
+# the applications export OTLP and nothing in them knows what receives it. Today the consumer is the
+# collector's own log, which is enough to see a trace and to assert that one was exported. The
+# specification's Langfuse consumer is one more exporter in the list below — no application change —
+# but it carries its own datastore alongside this stack, so it arrives with the increment that can
+# run it rather than with the walking skeleton.
+#
+# To see a span:
+#
+#     CLAIM_TRIAGE_OTEL_ENDPOINT=http://otel-collector:4318 \
+#       podman compose --profile observability up --detach --wait
+#     podman compose --profile smoke run --rm smoke
+#     podman compose logs otel-collector
+#
+# The spans arrive with the run, claim, experiment and variant as attributes, so a trace can be
+# joined to the run that produced it and to the arm it ran as.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+
+exporters:
+  debug:
+    # `detailed` prints every span's attributes: what a developer is looking at when they run this.
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
