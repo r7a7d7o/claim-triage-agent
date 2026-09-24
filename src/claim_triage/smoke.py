@@ -31,7 +31,7 @@ from claim_triage.contract.client import (
     ServiceUnavailableError,
 )
 from claim_triage.contract.models import Claim, ClaimStatus
-from claim_triage.triage.client import CLAIMS, RunClient, UnexpectedAnswer
+from claim_triage.triage.client import RunClient, UnexpectedAnswer
 from claim_triage.triage.run import IntakeRequest, RunResult
 
 if TYPE_CHECKING:
@@ -71,13 +71,13 @@ def main() -> int:
 
     try:
         with (
-            RunClient(entry_point, path=CLAIMS, timeout=REQUEST_TIMEOUT_SECONDS) as api,
+            RunClient(entry_point, timeout=REQUEST_TIMEOUT_SECONDS) as api,
             CoreSimClient(
                 settings.core_sim_base_url.rstrip("/"), timeout=REQUEST_TIMEOUT_SECONDS
             ) as systems,
         ):
             _waited(api.read_readiness, deadline)
-            run = api.submit(SUBMISSION)
+            run = api.intake(SUBMISSION)
             print(f"submitted claim {run.claim_id} as run {run.run_id}: status {run.status}")
             _expect_emitted(run)
 

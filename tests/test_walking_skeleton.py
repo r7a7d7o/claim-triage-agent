@@ -11,139 +11,31 @@ The stores are doubles and the apps are served for real on loopback ports, so th
 serialisation and the headers a hop between two deployables crosses are all covered, and no
 database, container or credential is involved. The same path runs in the container job over the
 real stores; `tests/test_audit_transaction.py` holds the store's own promise to a real Postgres.
+What the ingress lets through, and what it refuses before the graph is reached, is
+`tests/test_guarded_intake.py`'s subject: this module files a claim with no documents.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import httpx2
 import pytest
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from claim_triage import telemetry
-from claim_triage.api.surface import create_app as create_api
-from claim_triage.contract.client import CoreSimClient
 from claim_triage.contract.models import ClaimStatus
-from claim_triage.core_sim.app import create_app as create_systems
 from claim_triage.telemetry import CLAIM_ID, EXPERIMENT, RUN_ID, STATUS, VARIANT
 from claim_triage.triage import audit, graph
 from claim_triage.triage.audit import Actor, AuditEntry, AuditEntryContent
-from claim_triage.triage.client import RunClient
-from claim_triage.triage.pipeline import TriagePipeline
-from claim_triage.triage.run import RunResult, TriageRun
+from claim_triage.triage.run import TriageRun
 from claim_triage.triage.store import TriageStoreUnavailable
-from claim_triage.triage.surface import create_app as create_triager
-from support import InMemoryCoreSim, InMemoryTriageStore, free_port
+from support import InMemoryTriageStore, Skeleton, free_port
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
-
-    from fastapi import FastAPI
-    from opentelemetry.sdk.trace import ReadableSpan
-
-    from claim_triage.telemetry import Telemetry
+    from collections.abc import Callable
 
 POLICY = "SIM-2026-0001"
 """A policy the systems hold: a claim against any other is a documented refusal."""
-
-CLAIM: dict[str, object] = {
-    "policy_number": POLICY,
-    "incident_date": "2026-03-14",
-    "claim_amount_eur": "1840.50",
-}
-
-
-@dataclass(frozen=True, slots=True)
-class Skeleton:
-    """A walking skeleton, wired the way the stack wires it, and the pieces to assert on."""
-
-    api_url: str
-    systems: InMemoryCoreSim
-    triage: InMemoryTriageStore
-    exporter: InMemorySpanExporter
-    _traces: tuple[Telemetry, ...] = field(default_factory=tuple)
-
-    def submit(self, **claim: object) -> httpx2.Response:
-        """Post a claim at the entry point, and answer with whatever the boundary answered."""
-        with httpx2.Client(base_url=self.api_url) as client:
-            return client.post("/claims", json={**CLAIM, **claim})
-
-    def submit_ok(self, **claim: object) -> RunResult:
-        """Post a claim the skeleton is expected to carry, and parse the run it answered with."""
-        response = self.submit(**claim)
-        assert response.status_code == 201, response.text
-        return RunResult.model_validate(response.json())
-
-    def readiness(self) -> httpx2.Response:
-        """What the entry point answers when asked whether it can serve right now."""
-        with httpx2.Client(base_url=self.api_url) as client:
-            return client.get("/healthz")
-
-    def drained(self) -> tuple[ReadableSpan, ...]:
-        """Every span the run produced: they are batched, so this is what flushes them out."""
-        for traces in self._traces:
-            traces.flush()
-        return tuple(self.exporter.get_finished_spans())
-
-
-@pytest.fixture
-def skeleton(serve: Callable[[FastAPI], str]) -> Iterator[Callable[..., Skeleton]]:
-    """Build skeletons whose pieces a test can replace, and stop their telemetry afterwards."""
-    started: list[Telemetry] = []
-
-    def _skeleton(
-        *,
-        triage: InMemoryTriageStore | None = None,
-        systems: InMemoryCoreSim | None = None,
-        core_sim_url: str | None = None,
-        endpoint: str | None = None,
-        otlp_timeout: float = 5.0,
-    ) -> Skeleton:
-        exporter = InMemorySpanExporter()
-        # An endpoint means the real exporter, so nothing is kept in memory: that is what the
-        # stack-down case is about.
-        collected = None if endpoint is not None else exporter
-        systems = InMemoryCoreSim() if systems is None else systems
-        triage = InMemoryTriageStore() if triage is None else triage
-        url = serve(create_systems(systems)) if core_sim_url is None else core_sim_url
-        configured = telemetry.configure(
-            "triager",
-            environment="test",
-            exporter=collected,
-            endpoint=endpoint,
-            otlp_timeout=otlp_timeout,
-        )
-        entrypoint = telemetry.configure(
-            "api",
-            environment="test",
-            exporter=collected,
-            endpoint=endpoint,
-            otlp_timeout=otlp_timeout,
-        )
-        pipeline = TriagePipeline(
-            graph=graph.build_graph(),
-            systems=CoreSimClient(url),
-            store=triage,
-            telemetry=configured,
-        )
-        runs = RunClient(serve(create_triager(pipeline)))
-        api_url = serve(create_api(runs, telemetry=entrypoint))
-        started.extend((configured, entrypoint))
-        return Skeleton(
-            api_url=api_url,
-            systems=systems,
-            triage=triage,
-            exporter=exporter,
-            _traces=(configured, entrypoint),
-        )
-
-    yield _skeleton
-
-    for traces in started:
-        traces.shutdown()
 
 
 def test_a_claim_posted_at_the_boundary_reaches_the_end_of_the_graph(
@@ -172,6 +64,7 @@ def test_a_claim_posted_at_the_boundary_reaches_the_end_of_the_graph(
         experiment="baseline",
         variant="replay",
         status=ClaimStatus.TRIAGED,
+        guard_verdicts=[],
         trace_id=run.trace_id,
         started_at=recorded.started_at,
         completed_at=recorded.completed_at,

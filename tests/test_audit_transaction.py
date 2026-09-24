@@ -22,15 +22,25 @@ import pytest
 
 from claim_triage.config import InfrastructureSettings
 from claim_triage.contract.models import ClaimStatus
+from claim_triage.guards.verdict import Check, DocumentVerdicts, Verdict
 from claim_triage.triage import audit
 from claim_triage.triage.audit import Actor, AuditEntryContent
 from claim_triage.triage.run import TriageRun
-from claim_triage.triage.store import PostgresTriageStore
+from claim_triage.triage.store import PostgresTriageStore, TriageStoreUnavailable
 
 pytestmark = pytest.mark.postgres
 
 CLAIM: UUID = UUID("9d7c5b21-4e8f-4a36-b0d2-71f3c6e95a48")
 RECORDED_AT = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
+
+VERDICTS: list[DocumentVerdicts] = [
+    DocumentVerdicts(
+        filename="oznamenie-skody.pdf",
+        media_type="application/pdf",
+        verdicts=[Verdict(check=Check.SIZE, passed=True, detail="1841 bytes, within the ceiling")],
+    )
+]
+"""What the run was admitted with, so these tests carry verdicts through the columns as well."""
 
 
 class ForcedFailure(Exception):
@@ -62,6 +72,7 @@ def a_run() -> TriageRun:
         experiment="baseline",
         variant="replay",
         status=ClaimStatus.TRIAGED,
+        guard_verdicts=VERDICTS,
         trace_id="ab" * 16,
         started_at=RECORDED_AT,
         completed_at=RECORDED_AT,
@@ -75,6 +86,7 @@ def content(run: TriageRun, node: str = "noop") -> AuditEntryContent:
         node=node,
         actor=Actor.AGENT,
         status=run.status,
+        guard_verdicts=run.guard_verdicts,
         experiment=run.experiment,
         variant=run.variant,
         trace_id=run.trace_id,
@@ -161,6 +173,38 @@ def test_the_chain_continues_over_what_the_log_already_holds(store: PostgresTria
     assert [entry.seq for entry in entries] == [1, 2, 3]
     assert [entry.prev_hash for entry in entries[1:]] == [entry.hash for entry in entries[:-1]]
     assert audit.verify(entries).ok
+
+
+def test_a_store_that_fails_inside_the_transaction_leaves_neither_write(
+    store: PostgresTriageStore, dsn: str
+) -> None:
+    """The database going away between the two writes is a store failure, not a half-written run."""
+    run = a_run()
+
+    with pytest.raises(TriageStoreUnavailable):
+        _both_writes_over_a_store_that_dies(store, run, dsn)
+
+    assert store.read_run(run.run_id) is None
+    assert store.entries() == ()
+
+
+def _both_writes_over_a_store_that_dies(
+    store: PostgresTriageStore, run: TriageRun, dsn: str
+) -> None:
+    """Both writes, with the connection killed between them: the database's own failure."""
+    with store.transaction() as transaction:
+        transaction.record_run(run)
+        _terminate_the_other_backends(dsn)
+        transaction.append_entry(content(run))
+
+
+def _terminate_the_other_backends(dsn: str) -> None:
+    """Kill every backend on this database but this one, which is the store's own connection."""
+    with psycopg.connect(dsn) as connection:
+        connection.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+            " WHERE pid <> pg_backend_pid() AND datname = current_database()"
+        )
 
 
 def test_an_entry_changed_in_the_database_is_detected(store: PostgresTriageStore, dsn: str) -> None:

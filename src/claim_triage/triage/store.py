@@ -23,13 +23,15 @@ from uuid import UUID
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
+from claim_triage.guards.verdict import DocumentVerdicts
 from claim_triage.triage import audit
 from claim_triage.triage.audit import AuditEntry, AuditEntryContent
 from claim_triage.triage.run import TriageRun
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
     from contextlib import AbstractContextManager
     from typing import Any
 
@@ -42,42 +44,57 @@ CHAIN_LOCK: Final = 6_297_291
 SCHEMA: Final = (
     """
     CREATE TABLE IF NOT EXISTS triage_runs (
-        run_id       uuid PRIMARY KEY,
-        claim_id     uuid NOT NULL,
-        experiment   text NOT NULL,
-        variant      text NOT NULL,
-        status       text NOT NULL,
-        trace_id     text NOT NULL,
-        started_at   timestamptz NOT NULL,
-        completed_at timestamptz NOT NULL
+        run_id         uuid PRIMARY KEY,
+        claim_id       uuid NOT NULL,
+        experiment     text NOT NULL,
+        variant        text NOT NULL,
+        status         text NOT NULL,
+        guard_verdicts jsonb NOT NULL,
+        trace_id       text NOT NULL,
+        started_at     timestamptz NOT NULL,
+        completed_at   timestamptz NOT NULL
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS audit_log (
-        seq         integer PRIMARY KEY,
-        claim_id    uuid NOT NULL,
-        run_id      uuid NOT NULL,
-        node        text NOT NULL,
-        actor       text NOT NULL,
-        status      text NOT NULL,
-        experiment  text NOT NULL,
-        variant     text NOT NULL,
-        trace_id    text NOT NULL,
-        recorded_at timestamptz NOT NULL,
-        prev_hash   text NOT NULL,
-        hash        text NOT NULL
+        seq            integer PRIMARY KEY,
+        claim_id       uuid NOT NULL,
+        run_id         uuid NOT NULL,
+        node           text NOT NULL,
+        actor          text NOT NULL,
+        status         text NOT NULL,
+        guard_verdicts jsonb NOT NULL,
+        experiment     text NOT NULL,
+        variant        text NOT NULL,
+        trace_id       text NOT NULL,
+        recorded_at    timestamptz NOT NULL,
+        prev_hash      text NOT NULL,
+        hash           text NOT NULL
     )
+    """,
+    # A database that predates the guard verdicts gains the column where it is used rather than
+    # through a migration tool: a run recorded before the ingress existed was admitted with no
+    # verdicts, which is what an empty list says. The next increment that changes a table this
+    # service owns is the one to bring a migration tool in, if it still only has this one.
+    """
+    ALTER TABLE triage_runs
+        ADD COLUMN IF NOT EXISTS guard_verdicts jsonb NOT NULL DEFAULT '[]'::jsonb
+    """,
+    """
+    ALTER TABLE audit_log
+        ADD COLUMN IF NOT EXISTS guard_verdicts jsonb NOT NULL DEFAULT '[]'::jsonb
     """,
 )
 """Every table this service owns, applied one statement at a time before its first use."""
 
 RUN_COLUMNS: Final = (
-    "run_id, claim_id, experiment, variant, status, trace_id, started_at, completed_at"
+    "run_id, claim_id, experiment, variant, status, guard_verdicts, trace_id, started_at,"
+    " completed_at"
 )
 
 ENTRY_COLUMNS: Final = (
-    "seq, claim_id, run_id, node, actor, status, experiment, variant, trace_id, recorded_at,"
-    " prev_hash, hash"
+    "seq, claim_id, run_id, node, actor, status, guard_verdicts, experiment, variant, trace_id,"
+    " recorded_at, prev_hash, hash"
 )
 
 
@@ -207,13 +224,14 @@ class _PostgresTriageTransaction:
     def record_run(self, run: TriageRun) -> None:
         """Insert the run; a run already recorded fails the transaction rather than overwriting."""
         self._connection.execute(
-            f"INSERT INTO triage_runs ({RUN_COLUMNS}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            f"INSERT INTO triage_runs ({RUN_COLUMNS}) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 run.run_id,
                 run.claim_id,
                 run.experiment,
                 run.variant,
                 run.status,
+                _verdicts(run.guard_verdicts),
                 run.trace_id,
                 run.started_at,
                 run.completed_at,
@@ -232,7 +250,7 @@ class _PostgresTriageTransaction:
         entry = audit.append(prev_hash, seq, content)
         self._connection.execute(
             f"INSERT INTO audit_log ({ENTRY_COLUMNS})"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 entry.seq,
                 entry.claim_id,
@@ -240,6 +258,7 @@ class _PostgresTriageTransaction:
                 entry.node,
                 entry.actor,
                 entry.status,
+                _verdicts(entry.guard_verdicts),
                 entry.experiment,
                 entry.variant,
                 entry.trace_id,
@@ -249,3 +268,8 @@ class _PostgresTriageTransaction:
             ),
         )
         return entry
+
+
+def _verdicts(verdicts: Sequence[DocumentVerdicts]) -> Jsonb:
+    """One value's verdicts as the column's JSON: one place, for both tables that hold them."""
+    return Jsonb([document.model_dump(mode="json") for document in verdicts])

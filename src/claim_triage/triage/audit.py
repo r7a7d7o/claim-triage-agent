@@ -26,6 +26,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from claim_triage.contract.models import ClaimStatus
+from claim_triage.guards.verdict import DocumentVerdicts
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,6 +55,8 @@ class AuditEntryContent(BaseModel):
     actor: Actor
     # Where the claim stands now: the state change this entry is the evidence for.
     status: ClaimStatus
+    # What the guards answered on the way here, so the decision carries the safety evidence with it.
+    guard_verdicts: list[DocumentVerdicts]
     experiment: str
     variant: str
     trace_id: str
@@ -138,6 +141,7 @@ def _canonical(entry: AuditEntry) -> str:
         "node": entry.node,
         "actor": str(entry.actor),
         "status": str(entry.status),
+        "guard_verdicts": [document.model_dump(mode="json") for document in entry.guard_verdicts],
         "experiment": entry.experiment,
         "variant": entry.variant,
         "trace_id": entry.trace_id,

@@ -33,7 +33,7 @@ from claim_triage.triage.graph import build_graph
 from claim_triage.triage.pipeline import TriagePipeline
 from claim_triage.triage.run import RunResult
 from claim_triage.triage.surface import create_app as create_triager
-from support import InMemoryCoreSim, InMemoryTriageStore, free_port
+from support import TEST_GUARD, InMemoryCoreSim, InMemoryTriageStore, free_port
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,7 +117,7 @@ def stack(serve: Callable[[App], str]) -> Callable[[], Stack]:
         )
         runs = RunClient(serve(create_triager(pipeline)))
         return Stack(
-            entry_point=serve(create_api(runs, telemetry=traces)),
+            entry_point=serve(create_api(runs, telemetry=traces, guard=TEST_GUARD)),
             systems_url=systems_url,
             systems=systems,
             triage=triage,
@@ -189,7 +189,7 @@ def test_a_refused_claim_fails_the_run(
     [
         (((200, READY), (201, "not json at all")), "answered non-JSON"),
         (((200, READY), (201, {**RUN, "status": "paid"})), "the wire does not cover"),
-        (((200, READY), (202, RUN)), "outside the contract"),
+        (((200, READY), (202, RUN)), "outside the boundary's vocabulary"),
         (((200, READY), (201, {**RUN, "status": ClaimStatus.RECEIVED.value})), "to emit"),
         (((200, READY), (201, RUN), (200, CLAIM)), "surrounding systems hold"),
     ],

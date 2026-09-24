@@ -21,7 +21,9 @@ from pydantic import ValidationError
 from claim_triage import DISTRIBUTION
 from claim_triage.config import (
     ENV_PREFIX,
+    GUARD_ENV_PREFIX,
     MODEL_ENV_PREFIX,
+    GuardSettings,
     InfrastructureSettings,
     ModelSettings,
     ServiceSettings,
@@ -65,6 +67,7 @@ class Resolution:
     port: int
     infrastructure: InfrastructureSettings
     model: ModelSettings
+    guard: GuardSettings
 
     def report(self) -> dict[str, Any]:
         """The startup report: what this process is, where it binds, and what it is wired to."""
@@ -88,6 +91,17 @@ class Resolution:
             "model_provider": self.model.provider.value,
             "model_name": self.model.name or None,
             "model_base_url": self.model.base_url or None,
+            # What the guards would let in, so the thresholds a deployment actually runs with are in
+            # its own report rather than only in its environment.
+            "guard": {
+                "media_types": sorted(self.guard.media_types),
+                "max_submission_bytes": self.guard.max_submission_bytes,
+                "max_document_bytes": self.guard.max_document_bytes,
+                "max_document_pages": self.guard.max_document_pages,
+                "max_archive_expansion_ratio": self.guard.max_archive_expansion_ratio,
+                "rate_limit_burst": self.guard.rate_limit_burst,
+                "rate_limit_refill_per_second": self.guard.rate_limit_refill_per_second,
+            },
         }
 
 
@@ -99,6 +113,7 @@ def resolve(name: str) -> Resolution:
     try:
         infrastructure = InfrastructureSettings()
         model = ModelSettings()
+        guard = GuardSettings()
         bind = ServiceSettings(_env_prefix=prefix)
     except ValidationError as rejected:
         raise ConfigurationRejected(rejected.errors(), _environment_variables(prefix)) from None
@@ -109,6 +124,7 @@ def resolve(name: str) -> Resolution:
         port=service.default_port if bind.port is None else bind.port,
         infrastructure=infrastructure,
         model=model,
+        guard=guard,
     )
 
 
@@ -138,5 +154,6 @@ def _environment_variables(prefix: str) -> dict[str, str]:
     return {
         **{field: f"{ENV_PREFIX}{field.upper()}" for field in InfrastructureSettings.model_fields},
         **{field: f"{MODEL_ENV_PREFIX}{field.upper()}" for field in ModelSettings.model_fields},
+        **{field: f"{GUARD_ENV_PREFIX}{field.upper()}" for field in GuardSettings.model_fields},
         **{field: f"{prefix}{field.upper()}" for field in ServiceSettings.model_fields},
     }
