@@ -320,12 +320,11 @@ def test_a_configured_key_is_sent_as_a_bearer(serve: Callable[[FastAPI], str]) -
 
 
 @pytest.mark.provider
+@pytest.mark.parametrize("said", ["model is overloaded", "x" * 900], ids=["brief", "endless"])
 def test_a_refusal_is_relayed_with_the_status_and_what_the_endpoint_said(
-    serve: Callable[[FastAPI], str],
+    serve: Callable[[FastAPI], str], said: str
 ) -> None:
-    provider = FakeProvider(
-        status_code=429, body=json.dumps({"error": {"message": "model is overloaded"}})
-    )
+    provider = FakeProvider(status_code=429, body=json.dumps({"error": {"message": said}}))
 
     with (
         ProviderModel(
@@ -336,7 +335,35 @@ def test_a_refusal_is_relayed_with_the_status_and_what_the_endpoint_said(
         model.answer(claim_from_a_notification())
 
     assert refused.value.status_code == 429
-    assert "model is overloaded" in refused.value.detail
+    assert said[:20] in refused.value.detail
+    # A refusal is read by a human, so what the endpoint said is carried bounded rather than whole.
+    assert len(refused.value.detail) <= 600
+
+
+@pytest.mark.provider
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<html>a gateway answered, not the endpoint</html>",
+        '{"choices": []}',
+        '{"choices": [{"message": {"content": null}}]}',
+    ],
+    ids=["not-the-wire", "no-choices", "no-content"],
+)
+def test_a_body_outside_the_completions_wire_is_a_defect(
+    serve: Callable[[FastAPI], str], body: str
+) -> None:
+    """An endpoint that answers 200 with something other than a choice carrying an answer has not
+    answered the call: a defect, named as one, rather than a refusal or something to retry."""
+    provider = FakeProvider(body=body)
+
+    with (
+        ProviderModel(
+            f"{serve(provider.app())}/v1", name="local-model", timeout=TIMEOUT_SECONDS
+        ) as model,
+        pytest.raises(UnusableAnswer),
+    ):
+        model.answer(claim_from_a_notification())
 
 
 @pytest.mark.provider
