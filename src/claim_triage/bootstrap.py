@@ -36,17 +36,13 @@ DISTRIBUTION: Final = "claim-triage-agent"
 def bootstrap(name: str) -> int:
     """Resolve the named deployable's configuration, report it, and return the process exit code."""
     service = deployable(name)
+    prefix = service_env_prefix(service.name)
 
     try:
         infrastructure = InfrastructureSettings()
+        bind = ServiceSettings(_env_prefix=prefix)
     except ValidationError as rejected:
-        return _rejected(rejected, {field: f"{ENV_PREFIX}{field.upper()}" for field in _fields()})
-
-    try:
-        bind = ServiceSettings(_env_prefix=service_env_prefix(service.name))
-    except ValidationError as rejected:
-        prefix = service_env_prefix(service.name)
-        return _rejected(rejected, {field: f"{prefix}{field.upper()}" for field in _fields()})
+        return _rejected(rejected, _environment_variables(prefix))
 
     port = service.default_port if bind.port is None else bind.port
     print(json.dumps(_report(service.name, service.scaling_axis, bind.host, port, infrastructure)))
@@ -77,9 +73,12 @@ def _report(
     }
 
 
-def _fields() -> tuple[str, ...]:
-    """Every configured field name, so a rejection can name the variable instead of the field."""
-    return tuple(InfrastructureSettings.model_fields) + tuple(ServiceSettings.model_fields)
+def _environment_variables(prefix: str) -> dict[str, str]:
+    """Map every configured field to the variable that sets it, for naming it in a rejection."""
+    return {
+        **{field: f"{ENV_PREFIX}{field.upper()}" for field in InfrastructureSettings.model_fields},
+        **{field: f"{prefix}{field.upper()}" for field in ServiceSettings.model_fields},
+    }
 
 
 def _rejected(rejected: PydanticValidationError, variables: Mapping[str, str]) -> int:

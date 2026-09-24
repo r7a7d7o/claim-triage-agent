@@ -72,6 +72,16 @@ def test_registry_states_the_documented_contract() -> None:
         assert subject.scaling_axis == scaling_axis
 
 
+def test_unknown_deployable_is_rejected_naming_the_known_ones() -> None:
+    with pytest.raises(LookupError) as raised:
+        deployable("apii")
+
+    message = str(raised.value)
+    assert "apii" in message
+    for name, _, _, _ in CONTRACT:
+        assert name in message
+
+
 @pytest.mark.parametrize(
     ("name", "console_script", "default_port"),
     [row[:3] for row in CONTRACT],
